@@ -8,6 +8,14 @@ The format is inspired by Keep a Changelog and uses project release tags where a
 
 - Reserved for upcoming changes before the next tagged release.
 
+## [0.7.0] - 2026-04-20
+
+### Changed
+
+- Made `unattended` configurable in both send and listen cfg workflows.
+- Added `unattended` to the listen cfg builder UI and persisted listen cfg output.
+- Kept runtime and cfg behavior aligned so unattended mode can be stored and reused consistently across both workflows.
+
 ## [0.6.1] - 2026-04-20
 
 ### Added

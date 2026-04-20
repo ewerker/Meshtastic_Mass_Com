@@ -1,6 +1,6 @@
 # Meshtastic_Mass_Com
 
-Current version: `0.6.1`
+Current version: `0.7.0`
 
 English documentation. German version: [README.de.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\README.de.md)
 Release notes: [CHANGELOG.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\CHANGELOG.md)
