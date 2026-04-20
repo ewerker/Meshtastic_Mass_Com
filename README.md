@@ -59,12 +59,26 @@ Dann werden die Werte aus der CFG verwendet.
 - Existiert die CFG bereits und das Skript wird mit Parametern gestartet, werden diese Werte in die CFG uebernommen.
 - Wird das Skript ohne Parameter gestartet, gelten die Werte aus der CFG.
 - Gibt es weder CFG noch Parameter, zeigt das Skript ein Beispiel fuer einen gueltigen Erstaufruf.
+- Mit `--forcecfg` wird die CFG bei einem Lauf mit Parametern in jedem Fall erzeugt oder aktualisiert.
+- Mit `--protectcfg` wird die CFG bei einem Lauf mit Parametern nicht veraendert.
 - Mit `--clear` wird die CFG geloescht.
 
 CFG loeschen:
 
 ```powershell
 python .\send_to_all_nodes.py --clear
+```
+
+CFG immer aktualisieren:
+
+```powershell
+python .\send_to_all_nodes.py --port COM7 --channel-index 1 --message "Hallo" --forcecfg
+```
+
+CFG fuer einen Lauf schuetzen:
+
+```powershell
+python .\send_to_all_nodes.py --port COM7 --channel-index 0 --message "Test privat" --protectcfg
 ```
 
 ## Zielauswahl
@@ -155,6 +169,8 @@ python .\send_to_all_nodes.py --no-include-unmessageable
 python .\send_to_all_nodes.py --message "Hallo"
 python .\send_to_all_nodes.py --unattended
 python .\send_to_all_nodes.py --no-unattended
+python .\send_to_all_nodes.py --forcecfg
+python .\send_to_all_nodes.py --protectcfg
 python .\send_to_all_nodes.py --clear
 ```
 

@@ -81,6 +81,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Delete the cfg file in the script directory and exit.",
     )
+    cfg_group = parser.add_mutually_exclusive_group()
+    cfg_group.add_argument(
+        "--forcecfg",
+        action="store_true",
+        help="Always write/update the cfg when parameters are passed.",
+    )
+    cfg_group.add_argument(
+        "--protectcfg",
+        action="store_true",
+        help="Never write/update the cfg for this run, even when parameters are passed.",
+    )
     parser.add_argument(
         "--target-mode",
         choices=("all", "filter"),
@@ -192,6 +203,7 @@ def collect_cli_overrides(args: argparse.Namespace) -> dict:
 def resolve_settings(args: argparse.Namespace) -> dict | None:
     cli_overrides = collect_cli_overrides(args)
     config_exists = CONFIG_PATH.exists()
+    should_write_cfg = bool(cli_overrides) and not args.protectcfg
 
     if not config_exists and not cli_overrides:
         print(f"Keine Konfigurationsdatei gefunden: {CONFIG_PATH}")
@@ -203,11 +215,14 @@ def resolve_settings(args: argparse.Namespace) -> dict | None:
 
     if cli_overrides:
         settings.update(cli_overrides)
-        save_config(settings)
-        if config_exists:
-            print(f"Konfiguration aktualisiert: {CONFIG_PATH}")
-        else:
-            print(f"Konfiguration erstellt: {CONFIG_PATH}")
+        if should_write_cfg:
+            save_config(settings)
+            if config_exists:
+                print(f"Konfiguration aktualisiert: {CONFIG_PATH}")
+            else:
+                print(f"Konfiguration erstellt: {CONFIG_PATH}")
+        elif args.protectcfg:
+            print("CFG-Schutz aktiv, Konfiguration wird fuer diesen Lauf nicht gespeichert.")
     elif config_exists:
         print(f"Verwende Konfiguration aus: {CONFIG_PATH}")
 
