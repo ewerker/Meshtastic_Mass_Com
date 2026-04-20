@@ -17,7 +17,8 @@ SCRIPT_PATH = Path(__file__)
 SCRIPT_STEM = SCRIPT_PATH.stem
 SEND_CONFIG_PATH = SCRIPT_PATH.with_name(f"{SCRIPT_STEM}.send.cfg")
 LISTEN_CONFIG_PATH = SCRIPT_PATH.with_name(f"{SCRIPT_STEM}.listen.cfg")
-HISTORY_PATH = SCRIPT_PATH.with_name(f"{SCRIPT_STEM}.history.jsonl")
+SEND_HISTORY_PATH = SCRIPT_PATH.with_name(f"{SCRIPT_STEM}.send.history.jsonl")
+LISTEN_HISTORY_PATH = SCRIPT_PATH.with_name(f"{SCRIPT_STEM}.listen.history.jsonl")
 CONFIG_SECTION = "settings"
 DEFAULT_SETTINGS = {
     "mode": "send",
@@ -103,13 +104,13 @@ def colorize(text: str, color: str | None = None, *, bold: bool = False) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Communicate with Meshtastic through direct messages, group broadcasts, live listening, and local history."
+        description="Communicate with Meshtastic through direct messages, group broadcasts, live listening, logging, and local history."
     )
     parser.add_argument(
         "--mode",
         choices=("send", "listen", "broadcast", "history"),
         default=None,
-        help="Run in direct-message, listen, broadcast, or history mode.",
+        help="Workflow to run: send direct messages, listen live, broadcast once to a channel, or show local history.",
     )
     parser.add_argument(
         "--listen",
@@ -129,173 +130,184 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--port",
         default=None,
-        help="Serial port of the Meshtastic device. If omitted, available ports are auto-detected.",
+        help="Serial port of the Meshtastic device, for example COM7. If omitted, ports are auto-detected or selected interactively.",
     )
     parser.add_argument(
         "--channel-index",
         type=int,
         default=None,
-        help="Channel index to use for direct messages or broadcasts (default: 0).",
+        help="Channel index for direct messages or broadcasts. Typical values are 0 for a private/primary channel and 1 for LongFast.",
     )
     parser.add_argument(
         "--ack",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Request reliable delivery and wait for ACK/NAK for each message.",
+        help="For direct messages, wait for ACK, implicit ACK, or NAK. Broadcast mode ignores this switch.",
     )
     parser.add_argument(
         "--include-unmessageable",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Also try nodes that are marked as unmessageable.",
+        help="Also include nodes flagged by Meshtastic as unmessageable. Normally these are skipped.",
     )
     parser.add_argument(
         "--delay",
         type=float,
         default=None,
-        help="Delay in seconds between recipients or retries (default: 0.5).",
+        help="Delay in seconds between recipients and between retries. Useful to avoid sending too fast.",
     )
     parser.add_argument(
         "--timeout",
         type=int,
         default=None,
-        help="Connection timeout in seconds (default: 30).",
+        help="Timeout in seconds for connecting and for waiting on ACK/NAK results.",
     )
     parser.add_argument(
         "--final-wait",
         type=float,
         default=None,
-        help="Seconds to keep the connection open after the last transmission when not waiting for ACKs (default: 5.0).",
+        help="Extra seconds to keep the connection open after the last transmission when --ack is not used.",
     )
     parser.add_argument(
         "--retry-implicit-ack",
         type=int,
         default=None,
-        help="How many times to retry a message after an implicit ACK.",
+        help="How many times to retry after an implicit ACK, meaning sent but not explicitly confirmed.",
     )
     parser.add_argument(
         "--retry-nak",
         type=int,
         default=None,
-        help="How many times to retry a message after a NAK.",
+        help="How many times to retry after a NAK result.",
     )
     parser.add_argument(
         "--list-ports",
         action="store_true",
-        help="Only show available serial ports and exit.",
+        help="List available serial ports and exit without connecting.",
     )
     parser.add_argument(
         "--clear",
         action="store_true",
-        help="Delete the active cfg file for the selected workflow and exit.",
+        help="Delete the active cfg file for the current cfg family and exit. Send/broadcast/history use the send cfg; listen uses the listen cfg.",
     )
     cfg_group = parser.add_mutually_exclusive_group()
     cfg_group.add_argument(
         "--forcecfg",
         action="store_true",
-        help="Always write/update the active cfg when parameters are passed.",
+        help="Always create or update the active cfg from the current command-line parameters.",
     )
     cfg_group.add_argument(
         "--protectcfg",
         action="store_true",
-        help="Never write/update the active cfg for this run, even when parameters are passed.",
+        help="Never change the active cfg for this run, even when parameters are passed.",
     )
     parser.add_argument(
         "--target-mode",
         choices=("all", "filter", "select"),
         default=None,
-        help="Send to all known nodes, all filtered matches, or manually selected matches from a list.",
+        help="Recipient selection for send mode: all known nodes, only filtered matches, or a manual selection from a numbered list.",
     )
     parser.add_argument(
         "--filter",
         dest="target_filter",
         default=None,
-        help="Filter for node selection, e.g. !55d8c9dc, Rico, or FR*.",
+        help="Filter for send-mode node selection, for example !55d8c9dc, Rico, Naunhof, or FR*.",
     )
     parser.add_argument(
         "--selection",
         default=None,
-        help="Comma-separated 1-based indexes or ranges from the displayed/prefiltered list, e.g. 1,3-5.",
+        help="Comma-separated 1-based indexes or ranges from the displayed list, for example 1,3-5. Used with --target-mode select.",
     )
     parser.add_argument(
         "--message",
         default=None,
-        help="Default message text for direct messages or broadcasts. If omitted, the script asks interactively unless a message exists in the cfg.",
+        help="Message text for direct messages or broadcasts. If omitted, the script asks interactively unless a value exists in the cfg.",
     )
     parser.add_argument(
         "--dry-run",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Show what would happen without actually sending.",
+        help="Preview recipients, message, and channel without sending any packets.",
     )
     parser.add_argument(
         "--log-file",
         default=None,
-        help="Optional JSONL log file. Relative paths are stored next to the script.",
+        help="Optional JSONL activity log. Relative paths are resolved next to the script.",
     )
     parser.add_argument(
         "--history-file",
         default=None,
-        help="Optional JSONL history file. Relative paths are stored next to the script.",
+        help="Optional JSONL inbox/history file. Relative paths are resolved next to the script.",
     )
     parser.add_argument(
         "--history-filter",
         default=None,
-        help="Only show history entries whose sender/recipient/text matches this filter.",
+        help="In history mode, only show entries whose sender, recipient, or text matches this filter.",
     )
     parser.add_argument(
         "--history-limit",
         type=int,
         default=None,
-        help="How many recent history entries to show in history mode (default: 20).",
+        help="Maximum number of recent entries to show in history mode.",
     )
     parser.add_argument(
         "--listen-filter",
         default=None,
-        help="Only show received packets whose sender matches this filter.",
+        help="In listen mode, only show packets whose sender matches this filter.",
     )
     parser.add_argument(
         "--listen-channel-index",
         type=int,
         default=None,
-        help="Only show received packets for the specified channel index.",
+        help="In listen mode, only show packets received on this channel index.",
     )
     listen_scope_group = parser.add_mutually_exclusive_group()
     listen_scope_group.add_argument(
         "--dm-only",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Only show direct messages while listening.",
+        help="In listen mode, only show direct messages.",
     )
     listen_scope_group.add_argument(
         "--group-only",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Only show group/broadcast traffic while listening.",
+        help="In listen mode, only show group or broadcast traffic.",
     )
     parser.add_argument(
         "--text-only",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Only show text packets while listening.",
+        help="In listen mode, only show text packets and hide telemetry, node info, and other packet types.",
     )
     parser.add_argument(
         "-u",
         "--unattended",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Run without confirmation prompts. Missing required values must come from parameters or cfg.",
+        help="Run without confirmation prompts. All required values must then come from the CLI or the active cfg.",
     )
     return parser
 
 
 def example_command() -> str:
+    return example_command_for_family("send")
+
+
+def example_command_for_family(config_family: str) -> str:
     python_exe = Path(sys.executable)
     script_path = SCRIPT_PATH
+    if config_family == "listen":
+        return (
+            f'& "{python_exe}" "{script_path}" --listen --port COM7 --listen-filter "FR*" '
+            '--listen-channel-index 1 --dm-only --text-only --log-file ".\\listen_log.jsonl" '
+            '--history-file ".\\meshtastic_mass_com.listen.history.jsonl" --unattended --forcecfg'
+        )
     return (
-        f'"{python_exe}" "{script_path}" --mode send --port COM7 --channel-index 1 --ack '
+        f'& "{python_exe}" "{script_path}" --mode send --port COM7 --channel-index 1 --ack '
         '--delay 1.5 --timeout 60 --target-mode select --filter "FR*" --selection "1,3" '
-        '--retry-implicit-ack 1 --retry-nak 1 --message "Test message" --unattended --history-file ".\\history.jsonl"'
+        '--retry-implicit-ack 1 --retry-nak 1 --message "Test message" --unattended '
+        '--history-file ".\\meshtastic_mass_com.send.history.jsonl" --forcecfg'
     )
 
 
@@ -307,6 +319,10 @@ def determine_config_family(args: argparse.Namespace) -> str:
 
 def config_path_for_family(config_family: str) -> Path:
     return LISTEN_CONFIG_PATH if config_family == "listen" else SEND_CONFIG_PATH
+
+
+def history_path_for_family(config_family: str) -> Path:
+    return LISTEN_HISTORY_PATH if config_family == "listen" else SEND_HISTORY_PATH
 
 
 def load_config(config_path: Path) -> dict:
@@ -355,9 +371,8 @@ def load_config(config_path: Path) -> dict:
     return settings
 
 
-def save_config(settings: dict, config_path: Path) -> None:
-    parser = configparser.ConfigParser()
-    parser[CONFIG_SECTION] = {
+def config_file_values(settings: dict) -> dict[str, str]:
+    return {
         "mode": settings["mode"] or "send",
         "port": settings["port"] or "",
         "channel_index": str(settings["channel_index"]),
@@ -384,8 +399,131 @@ def save_config(settings: dict, config_path: Path) -> None:
         "history_filter": settings["history_filter"] or "",
         "history_limit": str(settings["history_limit"]),
     }
+
+
+def render_config_text(settings: dict, config_path: Path) -> str:
+    config_family = "listen" if config_path == LISTEN_CONFIG_PATH else "send"
+    values = config_file_values(settings)
+    active_modes = "listen" if config_family == "listen" else "send, broadcast, history"
+    family_title = "Listen workflow" if config_family == "listen" else "Send workflow"
+    example = example_command_for_family(config_family)
+
+    lines = [
+        f"# Meshtastic_Mass_Com - {family_title} configuration",
+        "#",
+        f"# This file is the default cfg for: {active_modes}",
+        "# It is created or updated by the script when parameters are passed without --protectcfg,",
+        "# or explicitly when --forcecfg is used.",
+        "# The CLI parameter names map directly to the keys below.",
+        "# Boolean values use true / false.",
+        "# Empty values mean: use built-in defaults or ask interactively when needed.",
+        "# Relative paths are resolved next to the script.",
+        "# Example command that creates or updates this cfg:",
+        f"# {example}",
+        "# Key parameter groups:",
+        "# --mode / --listen / --broadcast / --history select the workflow.",
+        "# --port and --channel-index select device and channel.",
+        "# --target-mode / --filter / --selection control send-mode recipients.",
+        "# --ack / --retry-implicit-ack / --retry-nak control delivery handling.",
+        "# --listen-filter / --listen-channel-index / --dm-only / --group-only / --text-only control listen-mode filtering.",
+        "# --log-file / --history-file / --history-filter / --history-limit control local files and history output.",
+        "# --forcecfg / --protectcfg / --clear control cfg handling.",
+        "# Notes for this cfg family:",
+    ]
+
+    if config_family == "listen":
+        lines.extend(
+            [
+                "# - This cfg is used by --listen or --mode listen.",
+                "# - Send-only options such as target_mode or retry_implicit_ack can still be stored here,",
+                "#   but they matter mainly if you later switch workflows via CLI for a single run.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "# - This cfg is used by default runs and by --mode send, --mode broadcast, and --mode history.",
+                "# - Listen-only options can still be stored here, but they are mainly relevant for temporary",
+                "#   one-off listen runs unless you maintain a dedicated listen cfg.",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            f"[{CONFIG_SECTION}]",
+            "",
+            "# Workflow",
+            f"# Stored mode for this cfg family. Typical default here: {'listen' if config_family == 'listen' else 'send'}.",
+            "# Allowed values: send | listen | broadcast | history",
+            f"mode = {values['mode']}",
+            "",
+            "# Connection",
+            "# Serial port such as COM7. Leave empty to auto-detect or ask.",
+            f"port = {values['port']}",
+            "# Channel index for direct messages or broadcasts, usually 0 or 1.",
+            f"channel_index = {values['channel_index']}",
+            "",
+            "# Sending reliability",
+            "# true waits for ACK/NAK for direct messages. Broadcast ignores this.",
+            f"ack = {values['ack']}",
+            "# true also tries nodes flagged as unmessageable.",
+            f"include_unmessageable = {values['include_unmessageable']}",
+            "# Delay in seconds between recipients or retries.",
+            f"delay = {values['delay']}",
+            "# Timeout in seconds for connection and ACK waiting.",
+            f"timeout = {values['timeout']}",
+            "# Extra wait in seconds after the last transmission when not waiting for ACKs.",
+            f"final_wait = {values['final_wait']}",
+            "# Retries after implicit ACK results.",
+            f"retry_implicit_ack = {values['retry_implicit_ack']}",
+            "# Retries after NAK results.",
+            f"retry_nak = {values['retry_nak']}",
+            "# true shows what would happen without transmitting.",
+            f"dry_run = {values['dry_run']}",
+            "",
+            "# Targeting",
+            "# all = every known node, filter = matching nodes only, select = choose from numbered list.",
+            f"target_mode = {values['target_mode']}",
+            "# Node filter for ID, short name, or long name. Wildcards such as FR* are supported.",
+            f"target_filter = {values['target_filter']}",
+            "# Number list or ranges from a displayed selection list, for example 1,3-5.",
+            f"selection = {values['selection']}",
+            "# Default text used for send or broadcast workflows.",
+            f"message = {values['message']}",
+            "# true skips confirmation prompts. Required values must then come from cfg or CLI.",
+            f"unattended = {values['unattended']}",
+            "",
+            "# Listen filters",
+            "# Sender filter for receive mode, for example FR* or !55d8c9dc.",
+            f"listen_filter = {values['listen_filter']}",
+            "# Only show received packets for this channel index. Empty = all channels.",
+            f"listen_channel_index = {values['listen_channel_index']}",
+            "# true shows only direct messages while listening.",
+            f"listen_dm_only = {values['listen_dm_only']}",
+            "# true shows only group or broadcast traffic while listening.",
+            f"listen_group_only = {values['listen_group_only']}",
+            "# true shows only text packets while listening.",
+            f"listen_text_only = {values['listen_text_only']}",
+            "",
+            "# Files",
+            "# Optional JSONL log file for send and listen activity.",
+            f"log_file = {values['log_file']}",
+            "# Optional JSONL history or inbox file.",
+            f"history_file = {values['history_file']}",
+            "# Filter applied by history mode when showing saved entries.",
+            f"history_filter = {values['history_filter']}",
+            "# Number of recent history entries to show in history mode.",
+            f"history_limit = {values['history_limit']}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def save_config(settings: dict, config_path: Path) -> None:
     with config_path.open("w", encoding="utf-8") as config_file:
-        parser.write(config_file)
+        config_file.write(render_config_text(settings, config_path))
 
 
 def collect_cli_overrides(args: argparse.Namespace) -> dict:
@@ -445,7 +583,7 @@ def resolve_settings(args: argparse.Namespace) -> dict | None:
     if not config_exists and not cli_overrides:
         print(f"No configuration file found: {config_path}")
         print("Run the script with parameters the first time, for example:")
-        print(example_command())
+        print(example_command_for_family(config_family))
         return None
 
     settings = load_config(config_path)
@@ -578,10 +716,57 @@ def collect_recipients(interface: SerialInterface, include_unmessageable: bool) 
                 "label": user.get("longName") or user.get("shortName") or node_id,
                 "long_name": user.get("longName", ""),
                 "short_name": user.get("shortName", ""),
+                "last_heard": node.get("lastHeard"),
+                "distance_m": (
+                    node.get("distance")
+                    or node.get("distanceMeters")
+                    or node.get("distance_m")
+                    or node.get("position", {}).get("distance")
+                    or node.get("position", {}).get("distanceMeters")
+                    or node.get("position", {}).get("distance_m")
+                ),
             }
         )
 
     return recipients
+
+
+def format_last_seen(last_heard) -> str:
+    if not last_heard:
+        return "unknown"
+    try:
+        timestamp = float(last_heard)
+    except (TypeError, ValueError):
+        return str(last_heard)
+
+    delta_seconds = max(0, int(time.time() - timestamp))
+    if delta_seconds < 60:
+        return f"{delta_seconds}s ago"
+    if delta_seconds < 3600:
+        return f"{delta_seconds // 60}m ago"
+    if delta_seconds < 86400:
+        return f"{delta_seconds // 3600}h ago"
+    return f"{delta_seconds // 86400}d ago"
+
+
+def format_distance(distance_m) -> str:
+    if distance_m in (None, ""):
+        return "unknown"
+    try:
+        meters = float(distance_m)
+    except (TypeError, ValueError):
+        return str(distance_m)
+
+    if meters < 1000:
+        return f"{meters:.0f} m"
+    return f"{meters / 1000:.2f} km"
+
+
+def format_recipient_summary(recipient: dict) -> str:
+    short_name = recipient.get("short_name") or "-"
+    long_name = recipient.get("long_name") or recipient.get("node_id") or "-"
+    last_seen = format_last_seen(recipient.get("last_heard"))
+    return f"{long_name} ({short_name}), {recipient['node_id']}, last seen {last_seen}"
 
 
 def recipient_matches_filter(recipient: dict, target_filter: str) -> bool:
@@ -653,7 +838,7 @@ def filter_recipients(recipients: list[dict], target_filter: str | None) -> list
 
 def print_recipient_list(recipients: list[dict]) -> None:
     for index, recipient in enumerate(recipients, start=1):
-        print(f"  {index:>2}. {recipient['label']} ({recipient['node_id']})")
+        print(f"  {index:>2}. {format_recipient_summary(recipient)}")
 
 
 def parse_selection_spec(selection: str, max_index: int) -> list[int]:
@@ -754,7 +939,7 @@ def confirm_send(message: str, recipients: list[dict], target_description: str, 
     print(f"Target mode: {target_description}")
     print(f"Recipients: {len(recipients)}")
     for recipient in recipients:
-        print(f"  - {recipient['label']} ({recipient['node_id']})")
+        print(f"  - {format_recipient_summary(recipient)}")
     print()
     if unattended:
         print("Unattended mode is active, sending without confirmation.")
@@ -814,9 +999,9 @@ def resolve_log_path(log_file: str | None) -> Path | None:
     return path
 
 
-def resolve_history_path(history_file: str | None) -> Path:
+def resolve_history_path(history_file: str | None, config_family: str) -> Path:
     if not history_file:
-        return HISTORY_PATH
+        return history_path_for_family(config_family)
     path = Path(history_file)
     if not path.is_absolute():
         path = SCRIPT_PATH.parent / path
@@ -1153,7 +1338,7 @@ def format_history_line(entry: dict) -> str:
 
 def run_listen_mode(interface: SerialInterface, settings: dict) -> int:
     log_path = resolve_log_path(settings["log_file"])
-    history_path = resolve_history_path(settings["history_file"])
+    history_path = resolve_history_path(settings["history_file"], "listen")
     received_count = 0
 
     print("Listen mode started. Press Ctrl+C to stop.")
@@ -1211,7 +1396,7 @@ def confirm_broadcast(message: str, channel_index: int, channel_label: str | Non
 
 
 def run_history_mode(settings: dict) -> int:
-    history_path = resolve_history_path(settings["history_file"])
+    history_path = resolve_history_path(settings["history_file"], "send")
     if not history_path.exists():
         print(colorize(f"No history file found: {history_path}", "yellow"))
         return 0
@@ -1250,7 +1435,7 @@ def run_broadcast_mode(interface: SerialInterface, settings: dict) -> int:
         return 1
 
     log_path = resolve_log_path(settings["log_file"])
-    history_path = resolve_history_path(settings["history_file"])
+    history_path = resolve_history_path(settings["history_file"], "send")
     channel_label = channel_name(interface, settings["channel_index"])
 
     if settings["ack"]:
@@ -1365,7 +1550,7 @@ def run_send_mode(interface: SerialInterface, settings: dict) -> int:
         return 1
 
     log_path = resolve_log_path(settings["log_file"])
-    history_path = resolve_history_path(settings["history_file"])
+    history_path = resolve_history_path(settings["history_file"], "send")
     recipients = collect_recipients(interface, settings["include_unmessageable"])
 
     if not recipients:

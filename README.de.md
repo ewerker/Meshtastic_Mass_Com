@@ -41,7 +41,8 @@ python -m pip install meshtastic pyserial
 - Skript: [meshtastic_mass_com.py](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\meshtastic_mass_com.py)
 - Sende-Konfiguration: [meshtastic_mass_com.send.cfg](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\meshtastic_mass_com.send.cfg)
 - Listen-Konfiguration: [meshtastic_mass_com.listen.cfg](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\meshtastic_mass_com.listen.cfg)
-- History-Datei: [meshtastic_mass_com.history.jsonl](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\meshtastic_mass_com.history.jsonl)
+- Standard-History fuer Senden: [meshtastic_mass_com.send.history.jsonl](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\meshtastic_mass_com.send.history.jsonl)
+- Standard-History fuer Lauschen: [meshtastic_mass_com.listen.history.jsonl](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\meshtastic_mass_com.listen.history.jsonl)
 - Englische Dokumentation: [README.md](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\README.md)
 
 ## Erster Start
@@ -115,6 +116,100 @@ Listen-Einstellungen in der Listen-CFG speichern:
 ```powershell
 python .\meshtastic_mass_com.py --listen --port COM7 --listen-filter "FR*" --text-only --forcecfg
 ```
+
+## Kommandozeilen-Parameter
+
+Die wichtigsten Parameter sind hier nach Zweck gruppiert.
+
+### Workflow-Auswahl
+
+- `--mode send`
+  - Sendet Direktnachrichten an die ausgewaehlten Empfaenger.
+- `--mode listen` oder `--listen`
+  - Haelt die Verbindung offen und zeigt passende eingehende Pakete live an.
+- `--mode broadcast` oder `--broadcast`
+  - Sendet genau eine Nachricht in einen Kanalchat statt einer DM-Schleife.
+- `--mode history` oder `--history`
+  - Zeigt lokal gespeicherte History-Eintraege ohne Verbindung zum Geraet.
+
+### Geraet und Kanal
+
+- `--port COM7`
+  - Waehlt den seriellen Port explizit. Ohne Angabe wird automatisch gesucht oder nachgefragt.
+- `--channel-index 0`
+  - Waehlt den Kanal fuer Direktnachrichten oder Broadcasts.
+- `--list-ports`
+  - Zeigt verfuegbare serielle Ports und beendet sich.
+
+### Empfaengerauswahl fuer den Sendemodus
+
+- `--target-mode all`
+  - Sendet an alle bekannten Nodes.
+- `--target-mode filter --filter "FR*"`
+  - Sendet nur an Nodes, die auf den Filter passen.
+- `--target-mode select --filter "FR*" --selection "1,3-5"`
+  - Filtert eine Liste vor und sendet dann nur an die ausgewaehlten Eintraege.
+- `--filter`
+  - Vergleicht Node-ID, Kurzname und Langname. Wildcards wie `FR*` oder `*mobil*` werden unterstuetzt.
+- `--selection`
+  - Kommagetrennte Listenindizes oder Bereiche aus der angezeigten Kandidatenliste.
+
+### Nachricht und Zustellverhalten
+
+- `--message "Hallo"`
+  - Setzt den Nachrichtentext fuer Sende- oder Broadcast-Modus.
+- `--ack`
+  - Wartet bei Direktnachrichten auf ACK, implizites ACK oder NAK.
+- `--retry-implicit-ack 1`
+  - Wiederholt bei "gesendet, aber nicht explizit bestaetigt".
+- `--retry-nak 1`
+  - Wiederholt nach einem NAK.
+- `--delay 1.5`
+  - Pause zwischen Empfaengern und Retries.
+- `--timeout 60`
+  - Timeout fuer Verbindung und ACK-Wartezeit.
+- `--final-wait 5`
+  - Haelt die Verbindung nach der letzten Uebertragung noch etwas offen, wenn `--ack` nicht genutzt wird.
+- `--dry-run`
+  - Zeigt Empfaenger, Nachricht und Kanal nur als Vorschau, ohne zu senden.
+
+### Filter im Listen-Modus
+
+- `--listen-filter "FR*"`
+  - Zeigt nur Pakete von passenden Absendern.
+- `--listen-channel-index 1`
+  - Zeigt nur Pakete eines Kanals.
+- `--dm-only`
+  - Zeigt nur Direktnachrichten.
+- `--group-only`
+  - Zeigt nur Gruppen- oder Broadcast-Verkehr.
+- `--text-only`
+  - Zeigt nur Textpakete und blendet Telemetrie, Nodeinfo und andere Typen aus.
+
+### Dateien und lokale History
+
+- `--log-file .\meshtastic_log.jsonl`
+  - Schreibt JSONL-Aktivitaetsdaten fuer Senden und Lauschen.
+- `--history-file .\meshtastic_history.jsonl`
+  - Ueberschreibt die Standarddatei fuer lokale Inbox/History.
+  - Standard ohne Ueberschreibung:
+    - Senden/Broadcast/History -> `meshtastic_mass_com.send.history.jsonl`
+    - Lauschen -> `meshtastic_mass_com.listen.history.jsonl`
+- `--history-filter "Naunhof"`
+  - Filtert die Anzeige im History-Modus.
+- `--history-limit 50`
+  - Begrenzt die Anzahl angezeigter History-Eintraege.
+
+### Umgang mit der CFG
+
+- `--forcecfg`
+  - Schreibt die aktuellen CLI-Werte immer in die aktive CFG.
+- `--protectcfg`
+  - Veraendert die aktive CFG in diesem Lauf niemals.
+- `--clear`
+  - Loescht die aktive CFG der gewaehlten CFG-Familie und beendet sich.
+- `--unattended`
+  - Ueberspringt Rueckfragen. Alle benoetigten Werte muessen dann aus CLI oder CFG kommen.
 
 ## Zielauswahl
 
@@ -278,7 +373,14 @@ python .\meshtastic_mass_com.py --mode broadcast --port COM7 --channel-index 1 -
 
 ## History
 
-Das Skript fuehrt eine lokale History-Datei fuer empfangene Pakete und gesendete Nachrichten. Diese kann spaeter auch ohne Geraet angezeigt werden.
+Das Skript fuehrt lokale History-Dateien fuer empfangene Pakete und gesendete Nachrichten. Diese koennen spaeter auch ohne Geraet angezeigt werden.
+
+Standard-Trennung:
+
+- Senden / Broadcast / History-Modus
+  - `meshtastic_mass_com.send.history.jsonl`
+- Listen-Modus
+  - `meshtastic_mass_com.listen.history.jsonl`
 
 Beispiele:
 
@@ -391,7 +493,7 @@ Dauerhaft lauschen und passende Pakete in ein gemeinsames Log schreiben:
 python .\meshtastic_mass_com.py --listen --port COM7 --text-only --log-file .\logs\listen_log.jsonl
 ```
 
-Beim Lauschen zusaetzlich eine separate lokale History-Datei pflegen:
+Beim Lauschen die Standard-History-Datei gezielt ueberschreiben:
 
 ```powershell
 python .\meshtastic_mass_com.py --listen --port COM7 --text-only --history-file .\logs\history.jsonl
@@ -423,39 +525,12 @@ Einen Broadcast nur testen, ohne zu senden und ohne die CFG zu veraendern:
 python .\meshtastic_mass_com.py --mode broadcast --port COM7 --channel-index 0 --message "Test Gruppe" --dry-run --protectcfg
 ```
 
-## Wichtige Optionen Referenz
+## Hilfe
+
+Die eingebaute CLI-Hilfe zeigt immer die aktuelle, vollstaendige Parameterliste:
 
 ```powershell
 python .\meshtastic_mass_com.py --help
-python .\meshtastic_mass_com.py --list-ports
-python .\meshtastic_mass_com.py --port COM7
-python .\meshtastic_mass_com.py --channel-index 1
-python .\meshtastic_mass_com.py --ack
-python .\meshtastic_mass_com.py --no-ack
-python .\meshtastic_mass_com.py --include-unmessageable
-python .\meshtastic_mass_com.py --no-include-unmessageable
-python .\meshtastic_mass_com.py --message "Hallo"
-python .\meshtastic_mass_com.py --selection "1,3-5"
-python .\meshtastic_mass_com.py --retry-implicit-ack 1
-python .\meshtastic_mass_com.py --retry-nak 1
-python .\meshtastic_mass_com.py --listen
-python .\meshtastic_mass_com.py --broadcast
-python .\meshtastic_mass_com.py --history
-python .\meshtastic_mass_com.py --listen-filter "FR*"
-python .\meshtastic_mass_com.py --listen-channel-index 1
-python .\meshtastic_mass_com.py --dm-only
-python .\meshtastic_mass_com.py --group-only
-python .\meshtastic_mass_com.py --text-only
-python .\meshtastic_mass_com.py --log-file .\meshtastic_log.jsonl
-python .\meshtastic_mass_com.py --history-file .\meshtastic_history.jsonl
-python .\meshtastic_mass_com.py --history-filter "Naunhof"
-python .\meshtastic_mass_com.py --history-limit 50
-python .\meshtastic_mass_com.py --dry-run
-python .\meshtastic_mass_com.py --unattended
-python .\meshtastic_mass_com.py --no-unattended
-python .\meshtastic_mass_com.py --forcecfg
-python .\meshtastic_mass_com.py --protectcfg
-python .\meshtastic_mass_com.py --clear
 ```
 
 ## Hinweise
