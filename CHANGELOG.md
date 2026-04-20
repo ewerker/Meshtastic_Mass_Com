@@ -8,6 +8,12 @@ The format is inspired by Keep a Changelog and uses project release tags where a
 
 - Reserved for upcoming changes before the next tagged release.
 
+## [0.7.5] - 2026-04-20
+
+### Changed
+
+- Updated the default autoresponder reply template text in the CLI, generated cfg help, and GUI builder help.
+
 ## [0.7.4] - 2026-04-20
 
 ### Added

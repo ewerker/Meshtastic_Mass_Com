@@ -58,7 +58,7 @@ DEFAULT_SETTINGS = {
     "autoresponder_message_mode": "filter",
     "autoresponder_message_filter": "!Ping",
     "autoresponder_reply": "Pong",
-    "autoresponder_reply_template": "Autoresponder : %shortname%: %message% / Message:  %answer%",
+    "autoresponder_reply_template": "Autoresponder triggered by  %shortname%: %message% / Answer:  %answer%",
     "retry_implicit_ack": 0,
     "retry_nak": 0,
     "dry_run": False,
@@ -842,7 +842,7 @@ def render_config_text(settings: dict, config_family_or_path) -> str:
                 "# Optional reply template with variables from the triggering message.",
                 "# Available variables: %node_id%, %label%, %shortname%, %longname%, %message%, %channel_index%, %channel_name%, %scope%, %answer%",
                 "# %answer% is replaced with the configured autoresponder_reply text.",
-                "# Example: Autoresponder : %shortname%: %message% / Message:  %answer%",
+                "# Example: Autoresponder triggered by  %shortname%: %message% / Answer:  %answer%",
                 f"autoresponder_reply_template = {values['autoresponder_reply_template']}",
                 "",
             ]

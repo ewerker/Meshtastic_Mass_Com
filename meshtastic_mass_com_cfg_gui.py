@@ -85,7 +85,7 @@ AUTORESPONDER_FIELDS = [
     FieldSpec("autoresponder_message_mode", "Message Mode", "choice", "filter", "Which messages may trigger replies. Example: filter.", ("all", "filter")),
     FieldSpec("autoresponder_message_filter", "Message Filter", "text", "!Ping", "Message text filter. Without wildcards it works like contains. Example: !Ping."),
     FieldSpec("autoresponder_reply", "Reply Text", "text", "Pong", "Fixed direct-message reply text. Example: Pong."),
-    FieldSpec("autoresponder_reply_template", "Reply Template", "text", "Autoresponder : %shortname%: %message% / Message:  %answer%", "Optional template with trigger variables. Variables: %node_id%, %label%, %shortname%, %longname%, %message%, %channel_index%, %channel_name%, %scope%, %answer%. %answer% is replaced with the configured autoresponder_reply text. Example: Autoresponder : %shortname%: %message% / Message:  %answer%"),
+    FieldSpec("autoresponder_reply_template", "Reply Template", "text", "Autoresponder triggered by  %shortname%: %message% / Answer:  %answer%", "Optional template with trigger variables. Variables: %node_id%, %label%, %shortname%, %longname%, %message%, %channel_index%, %channel_name%, %scope%, %answer%. %answer% is replaced with the configured autoresponder_reply text. Example: Autoresponder triggered by  %shortname%: %message% / Answer:  %answer%"),
 ]
 
 
@@ -381,7 +381,7 @@ class ConfigLogic:
                     "# Optional template with variables from the triggering message.",
                     "# Available variables: %node_id%, %label%, %shortname%, %longname%, %message%, %channel_index%, %channel_name%, %scope%, %answer%",
                     "# %answer% is replaced with the configured autoresponder_reply text.",
-                    "# Example: Autoresponder : %shortname%: %message% / Message:  %answer%",
+                    "# Example: Autoresponder triggered by  %shortname%: %message% / Answer:  %answer%",
                     f"autoresponder_reply_template = {settings_map['autoresponder_reply_template']}",
                     "",
                 ]
