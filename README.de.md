@@ -2,15 +2,19 @@
 
 Deutsche Dokumentation. English version: [README.md](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\README.md)
 
-Kleines Python-Werkzeug fuer Meshtastic, das Direktnachrichten an bekannte Nodes sendet, inklusive Filterung, ACK-Auswertung, unattended-Modus und lokaler Konfigurationsdatei.
+Kleines Python-Werkzeug fuer Meshtastic, das Direktnachrichten an bekannte Nodes sendet und zusaetzlich eingehenden Verkehr mitlesen kann, inklusive Filterung, ACK-Auswertung, Logging, unattended-Modus und lokaler Konfigurationsdatei.
 
 ## Funktionen
 
 - Sendet an alle bekannten Nodes oder nur an gefilterte Ziele
+- Kann eine vorgefilterte Liste anzeigen und daraus gezielt einzelne Nodes auswaehlen
 - Filtert ueber Node-ID, Kurzname oder Langname
 - Unterstuetzt Wildcards wie `FR*`
 - Erkennt serielle Ports automatisch oder laesst dich interaktiv waehlen
 - Wartet optional auf ACK, implizites ACK oder NAK
+- Kann bei implizitem ACK oder NAK automatisch erneut senden
+- Kann eingehende Pakete live mit Filtern anzeigen
+- Kann Sende- und Empfangsdaten in eine lokale JSONL-Datei schreiben
 - Speichert Laufzeitwerte in einer lokalen `.cfg`-Datei
 - Unterstuetzt unbeaufsichtigte Laeufe ohne Rueckfragen
 - Kann die Konfigurationsdatei gezielt schuetzen oder bewusst aktualisieren
@@ -42,7 +46,7 @@ Wenn noch keine Konfigurationsdatei existiert, sollte das Skript einmal mit Para
 Beispiel:
 
 ```powershell
-python .\send_to_all_nodes.py --port COM7 --channel-index 1 --ack --delay 1.5 --timeout 60 --target-mode filter --filter "FR*" --message "Testnachricht" --unattended --forcecfg
+python .\send_to_all_nodes.py --mode send --port COM7 --channel-index 1 --ack --delay 1.5 --timeout 60 --target-mode select --filter "FR*" --selection "1,3" --retry-implicit-ack 1 --retry-nak 1 --message "Testnachricht" --unattended --forcecfg
 ```
 
 Danach reicht oft:
@@ -94,6 +98,7 @@ Das Skript kann:
 
 - an alle bekannten Nodes senden
 - nur an gefilterte Nodes senden
+- aus einer nummerierten Liste einzelne Nodes auswaehlen, auf Wunsch nach Vorfilterung
 
 Interaktiv:
 
@@ -105,6 +110,7 @@ Dann fragt das Skript:
 
 - `1` fuer alle bekannten Nodes
 - `2` fuer gefiltertes Senden
+- `3` fuer manuelle Listenauswahl
 
 Direkte Beispiele per Parameter:
 
@@ -113,6 +119,8 @@ python .\send_to_all_nodes.py --target-mode all
 python .\send_to_all_nodes.py --target-mode filter --filter "FR*"
 python .\send_to_all_nodes.py --target-mode filter --filter "!55d8c9dc"
 python .\send_to_all_nodes.py --target-mode filter --filter "Rico"
+python .\send_to_all_nodes.py --target-mode select --filter "FR*"
+python .\send_to_all_nodes.py --target-mode select --filter "FR*" --selection "1,3-4" --unattended
 ```
 
 Filterregeln:
@@ -163,13 +171,176 @@ Moegliche Ergebnisse:
 - `Error ... No ACK/NAK ...`
   - Timeout ohne Rueckmeldung.
 
+Retry-Steuerung:
+
+- `--retry-implicit-ack 1`
+  - Sendet nach einem impliziten ACK einmal erneut.
+- `--retry-nak 1`
+  - Sendet nach einem NAK einmal erneut.
+
 Beispiel:
 
 ```powershell
-python .\send_to_all_nodes.py --port COM7 --channel-index 1 --ack --delay 1.5 --timeout 60
+python .\send_to_all_nodes.py --port COM7 --channel-index 1 --ack --delay 1.5 --timeout 60 --retry-implicit-ack 1 --retry-nak 1
 ```
 
-## Wichtige Optionen
+## Listen-Modus
+
+Das Skript kann auch verbunden bleiben und passende eingehende Pakete live anzeigen.
+
+Beispiele:
+
+```powershell
+python .\send_to_all_nodes.py --mode listen
+python .\send_to_all_nodes.py --listen --listen-filter "FR*"
+python .\send_to_all_nodes.py --listen --listen-channel-index 1
+python .\send_to_all_nodes.py --listen --dm-only
+python .\send_to_all_nodes.py --listen --group-only --text-only
+```
+
+Filter im Listen-Modus:
+
+- `--listen-filter`
+  - Filtert ueber Absender-Node-ID, Kurzname oder Langname
+- `--listen-channel-index`
+  - Zeigt nur Pakete eines bestimmten Kanals
+- `--dm-only`
+  - Zeigt nur Direktnachrichten
+- `--group-only`
+  - Zeigt nur Gruppen-/Broadcast-Verkehr
+- `--text-only`
+  - Zeigt nur Textpakete
+
+Beenden mit `Ctrl+C`.
+
+## Logging
+
+Mit `--log-file` schreibt das Skript JSONL-Eintraege fuer Sendeversuche und empfangene Pakete.
+
+Beispiele:
+
+```powershell
+python .\send_to_all_nodes.py --mode send --log-file .\meshtastic_log.jsonl
+python .\send_to_all_nodes.py --listen --log-file .\meshtastic_log.jsonl
+```
+
+## Beispiel-Workflows
+
+### Schnelle Alltagsnutzung
+
+Skript interaktiv starten und sich durchfuehren lassen:
+
+```powershell
+python .\send_to_all_nodes.py
+```
+
+Direktnachricht an alle bekannten Nodes auf `COM7`:
+
+```powershell
+python .\send_to_all_nodes.py --mode send --port COM7 --target-mode all --message "Hallo an alle"
+```
+
+Auf `COM7` lauschen und nur Textverkehr anzeigen:
+
+```powershell
+python .\send_to_all_nodes.py --listen --port COM7 --text-only
+```
+
+### Gefilterte Sende-Workflows
+
+Nur an Nodes senden, deren Rufname auf ein Muster passt:
+
+```powershell
+python .\send_to_all_nodes.py --mode send --port COM7 --channel-index 1 --target-mode filter --filter "FR*" --message "Netztest" --ack
+```
+
+Nur an eine exakte Node-ID senden:
+
+```powershell
+python .\send_to_all_nodes.py --mode send --port COM7 --channel-index 1 --target-mode filter --filter "!55d8c9dc" --message "Privater Test" --ack
+```
+
+Liste vorfiltern und dann einzelne Empfaenger manuell auswaehlen:
+
+```powershell
+python .\send_to_all_nodes.py --mode send --port COM7 --channel-index 1 --target-mode select --filter "FR*"
+```
+
+Dieselbe Auswahl unattended mit gespeicherten Indexen ausfuehren:
+
+```powershell
+python .\send_to_all_nodes.py --mode send --port COM7 --channel-index 1 --target-mode select --filter "FR*" --selection "1,3-5" --message "Geplanter Ping" --unattended
+```
+
+### Zuverlaessige Zustellung
+
+ACK anfordern und bei implizitem ACK oder NAK jeweils einmal erneut senden:
+
+```powershell
+python .\send_to_all_nodes.py --mode send --port COM7 --channel-index 1 --target-mode filter --filter "FR*" --message "Bitte bestaetigen" --ack --retry-implicit-ack 1 --retry-nak 1 --delay 1.5 --timeout 60
+```
+
+Kanal `0` fuer eine kleine private Gruppe nutzen, ohne die gespeicherte CFG zu veraendern:
+
+```powershell
+python .\send_to_all_nodes.py --mode send --port COM7 --channel-index 0 --target-mode select --selection "1-3" --message "Privater Check-in" --ack --protectcfg
+```
+
+### Listen-Workflows
+
+Nur LongFast-Verkehr auf Kanal `1` anzeigen:
+
+```powershell
+python .\send_to_all_nodes.py --listen --port COM7 --listen-channel-index 1
+```
+
+Nur Direktnachrichten von Nodes passend auf `FR*` anzeigen:
+
+```powershell
+python .\send_to_all_nodes.py --listen --port COM7 --listen-filter "FR*" --dm-only --text-only
+```
+
+Nur Gruppenverkehr anzeigen und Nicht-Text-Pakete sichtbar lassen:
+
+```powershell
+python .\send_to_all_nodes.py --listen --port COM7 --group-only
+```
+
+### Logging-Workflows
+
+Versand mit ACK-Auswertung und JSONL-Logdatei:
+
+```powershell
+python .\send_to_all_nodes.py --mode send --port COM7 --channel-index 1 --target-mode filter --filter "FR*" --message "Mit Log" --ack --retry-implicit-ack 1 --retry-nak 1 --log-file .\logs\send_log.jsonl
+```
+
+Dauerhaft lauschen und passende Pakete in ein gemeinsames Log schreiben:
+
+```powershell
+python .\send_to_all_nodes.py --listen --port COM7 --text-only --log-file .\logs\listen_log.jsonl
+```
+
+### CFG-zentrierte Workflows
+
+Ein wiederverwendbares unattended-Profil erzeugen oder aktualisieren:
+
+```powershell
+python .\send_to_all_nodes.py --mode send --port COM7 --channel-index 1 --target-mode select --filter "FR*" --selection "1,2" --message "Routine-Nachricht" --ack --retry-implicit-ack 1 --retry-nak 1 --log-file .\logs\routine.jsonl --unattended --forcecfg
+```
+
+Spaeter nur noch mit der gespeicherten CFG starten:
+
+```powershell
+python .\send_to_all_nodes.py
+```
+
+Temporar im Listen-Modus mit anderen Werten arbeiten, ohne die CFG zu veraendern:
+
+```powershell
+python .\send_to_all_nodes.py --listen --port COM7 --listen-filter "FR*" --dm-only --text-only --protectcfg
+```
+
+## Wichtige Optionen Referenz
 
 ```powershell
 python .\send_to_all_nodes.py --help
@@ -181,6 +352,16 @@ python .\send_to_all_nodes.py --no-ack
 python .\send_to_all_nodes.py --include-unmessageable
 python .\send_to_all_nodes.py --no-include-unmessageable
 python .\send_to_all_nodes.py --message "Hallo"
+python .\send_to_all_nodes.py --selection "1,3-5"
+python .\send_to_all_nodes.py --retry-implicit-ack 1
+python .\send_to_all_nodes.py --retry-nak 1
+python .\send_to_all_nodes.py --listen
+python .\send_to_all_nodes.py --listen-filter "FR*"
+python .\send_to_all_nodes.py --listen-channel-index 1
+python .\send_to_all_nodes.py --dm-only
+python .\send_to_all_nodes.py --group-only
+python .\send_to_all_nodes.py --text-only
+python .\send_to_all_nodes.py --log-file .\meshtastic_log.jsonl
 python .\send_to_all_nodes.py --unattended
 python .\send_to_all_nodes.py --no-unattended
 python .\send_to_all_nodes.py --forcecfg
