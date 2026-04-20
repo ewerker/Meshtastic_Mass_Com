@@ -1,3 +1,9 @@
+"""GUI config generator for Meshtastic_Mass_Com.
+
+Copyright (c) 2026 Frank Richter, https://w-2.de
+SPDX-License-Identifier: MIT
+"""
+
 import configparser
 from dataclasses import dataclass
 from pathlib import Path
@@ -204,6 +210,8 @@ class ConfigLogic:
 
         lines = [
             f"# Meshtastic_Mass_Com - {family_title} configuration",
+            "# Copyright (c) 2026 Frank Richter, https://w-2.de",
+            "# SPDX-License-Identifier: MIT",
             "#",
             f"# This file is the default cfg for: {family_modes}",
             "# It can be generated with the GUI helper or updated by the CLI tool itself.",

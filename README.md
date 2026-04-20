@@ -2,6 +2,8 @@
 
 English documentation. German version: [README.de.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\README.de.md)
 
+Copyright (c) 2026 Frank Richter, [w-2.de](https://w-2.de)
+
 Small Python utility for Meshtastic communication workflows: direct messages, group broadcasts, live listening, logging, history, and separate local config files for send and listen workflows.
 
 ## Features
@@ -35,6 +37,10 @@ Small Python utility for Meshtastic communication workflows: direct messages, gr
 ```bash
 python -m pip install meshtastic pyserial
 ```
+
+## License
+
+MIT License. See [LICENSE](C:\Users\richt\Documents\Codex\Meshtastic_tool\LICENSE).
 
 ## Files
 

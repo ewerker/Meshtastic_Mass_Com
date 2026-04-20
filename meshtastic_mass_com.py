@@ -1,3 +1,9 @@
+"""Meshtastic_Mass_Com.
+
+Copyright (c) 2026 Frank Richter, https://w-2.de
+SPDX-License-Identifier: MIT
+"""
+
 import argparse
 import configparser
 import fnmatch
@@ -523,6 +529,8 @@ def render_config_text(settings: dict, config_family_or_path) -> str:
 
     lines = [
         f"# Meshtastic_Mass_Com - {family_title} configuration",
+        "# Copyright (c) 2026 Frank Richter, https://w-2.de",
+        "# SPDX-License-Identifier: MIT",
         "#",
         f"# This file is the default cfg for: {active_modes}",
         "# It is created or updated by the script when parameters are passed without --protectcfg,",
