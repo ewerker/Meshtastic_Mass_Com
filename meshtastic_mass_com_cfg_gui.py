@@ -160,6 +160,10 @@ class ConfigLogic:
     @staticmethod
     def load_cfg(output_dir: Path, family: str) -> dict:
         path = ConfigLogic.config_path(output_dir, family)
+        return ConfigLogic.load_cfg_from_path(path, family)
+
+    @staticmethod
+    def load_cfg_from_path(path: Path, family: str) -> dict:
         settings = (
             ConfigLogic.default_listen_settings()
             if family == "listen"
@@ -345,7 +349,7 @@ class MeshtasticConfigGUI:
         self.save_button = None
 
         self._build_layout()
-        self.generate_preview()
+        self.load_existing_configs(initial=True)
 
     def _create_variables(self, specs: list[FieldSpec]) -> dict[str, tk.Variable]:
         variables: dict[str, tk.Variable] = {}
@@ -460,7 +464,7 @@ class MeshtasticConfigGUI:
         selected = filedialog.askdirectory(initialdir=self.output_dir_var.get() or str(SCRIPT_DIR))
         if selected:
             self.output_dir_var.set(selected)
-            self.status_var.set(f"Output folder selected: {selected}")
+            self.load_existing_configs()
 
     def _collect_values(self, specs: list[FieldSpec], variables: dict[str, tk.Variable]) -> dict:
         return {spec.key: variables[spec.key].get() for spec in specs}
@@ -517,17 +521,45 @@ class MeshtasticConfigGUI:
         widget.delete("1.0", tk.END)
         widget.insert("1.0", content)
 
-    def load_config(self) -> None:
+    def load_existing_configs(self, initial: bool = False) -> None:
         try:
             output_dir = Path(self.output_dir_var.get()).expanduser()
+            send_settings, listen_settings = ConfigLogic.load_cfg_pair(output_dir)
+            self._set_values(self.send_specs, self.send_vars, send_settings)
+            self._set_values(self.listen_specs, self.listen_vars, listen_settings)
+            self.generate_preview()
+            send_exists = ConfigLogic.config_path(output_dir, "send").exists()
+            listen_exists = ConfigLogic.config_path(output_dir, "listen").exists()
+            if send_exists or listen_exists:
+                self.status_var.set(f"Loaded existing cfg files from {output_dir}")
+            elif initial:
+                self.status_var.set("No existing cfg files found. Showing default values.")
+            else:
+                self.status_var.set(f"No cfg files found in {output_dir}. Showing default values.")
+        except Exception as exc:
+            messagebox.showerror(APP_TITLE, f"Could not load existing config files:\n{exc}")
+            self.status_var.set(f"Load failed: {exc}")
+
+    def load_config(self) -> None:
+        try:
             family = self._active_family()
-            settings = ConfigLogic.load_cfg(output_dir, family)
+            initial_dir = Path(self.output_dir_var.get()).expanduser()
+            selected = filedialog.askopenfilename(
+                title=f"Load {family} cfg template",
+                initialdir=str(initial_dir),
+                filetypes=[("CFG files", "*.cfg"), ("All files", "*.*")],
+            )
+            if not selected:
+                self.status_var.set("Load cancelled.")
+                return
+            selected_path = Path(selected)
+            settings = ConfigLogic.load_cfg_from_path(selected_path, family)
             if family == "listen":
                 self._set_values(self.listen_specs, self.listen_vars, settings)
             else:
                 self._set_values(self.send_specs, self.send_vars, settings)
             self.generate_preview()
-            self.status_var.set(f"Loaded {family} cfg from {output_dir}")
+            self.status_var.set(f"Loaded {family} cfg template from {selected_path}")
         except Exception as exc:
             messagebox.showerror(APP_TITLE, f"Could not load config files:\n{exc}")
             self.status_var.set(f"Load failed: {exc}")

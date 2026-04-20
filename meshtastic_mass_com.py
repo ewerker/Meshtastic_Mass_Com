@@ -746,8 +746,11 @@ def resolve_settings(args: argparse.Namespace) -> dict | None:
     config_family = determine_config_family(args)
     config_path = config_path_for_family(config_family)
     cli_overrides = collect_cli_overrides(args)
+    cfg_relevant_overrides = {
+        key: value for key, value in cli_overrides.items() if not (key == "mode" and value == "send")
+    }
     config_exists = config_path.exists()
-    should_write_cfg = bool(cli_overrides) and not args.protectcfg
+    should_write_cfg = bool(cfg_relevant_overrides) and not args.protectcfg
 
     if not config_exists and not cli_overrides:
         print(f"No configuration file found: {config_path}")
