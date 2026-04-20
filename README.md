@@ -1,26 +1,25 @@
 # Meshtastic_Mass_Text
 
-Kleines Python-Skript fuer Meshtastic, das Direktnachrichten an bekannte Nodes sendet.
+English documentation. German version: [README.de.md](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\README.de.md)
 
-## Funktionen
+Small Python utility for Meshtastic that sends direct messages to known nodes, with filtering, ACK handling, unattended mode, and a local config file.
 
-- fragt den Nachrichtentext interaktiv ab oder nutzt eine gespeicherte Standardnachricht
-- findet serielle Ports automatisch oder laesst dich einen Port auswaehlen
-- verbindet sich mit einem Meshtastic-Geraet ueber USB/COM
-- liest bekannte Nodes aus
-- kann an alle bekannten Nodes oder nur an gefilterte Ziele senden
-- unterstuetzt Filter ueber Node-ID, Kurzname und Langname, z. B. `!55d8c9dc`, `Rico` oder `FR*`
-- ueberspringt standardmaessig den eigenen Node
-- ueberspringt standardmaessig Nodes, die als `unmessageable` markiert sind
-- zeigt die Empfaengerliste vor dem Versand zur Bestaetigung an
-- kann auf ACK, implizites ACK oder NAK warten
-- speichert Laufzeitparameter in einer CFG-Datei im selben Ordner
-- kann unbeaufsichtigt ohne Rueckfragen laufen
+## Features
 
-## Voraussetzungen
+- Sends to all known nodes or only filtered targets
+- Filters by node ID, short name, or long name
+- Supports wildcard filters such as `FR*`
+- Can auto-detect serial ports or let you choose one interactively
+- Waits for ACK, implicit ACK, or NAK when requested
+- Stores runtime settings in a local `.cfg` file
+- Supports unattended runs without prompts
+- Can protect the config from changes or force config updates explicitly
 
-- Windows mit Python 3.14+
-- installierte Python-Pakete:
+## Requirements
+
+- Windows
+- Python 3.14+
+- Python packages:
   - `meshtastic`
   - `pyserial`
 
@@ -30,143 +29,158 @@ Kleines Python-Skript fuer Meshtastic, das Direktnachrichten an bekannte Nodes s
 python -m pip install meshtastic pyserial
 ```
 
-## Dateien
+## Files
 
-- Skript: [send_to_all_nodes.py](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.py)
-- Konfiguration: [send_to_all_nodes.cfg](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.cfg)
+- Script: [send_to_all_nodes.py](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.py)
+- Local config: [send_to_all_nodes.cfg](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.cfg)
+- German documentation: [README.de.md](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\README.de.md)
 
-## Erster Start
+## First Run
 
-Wenn noch keine CFG existiert, sollte das Skript beim ersten Mal mit Parametern gestartet werden. Dabei wird die CFG automatisch erzeugt.
+If no config file exists yet, start the script once with parameters so it can create one.
 
-Beispiel:
+Example:
 
 ```powershell
-python .\send_to_all_nodes.py --port COM7 --channel-index 1 --ack --delay 1.5 --timeout 60 --target-mode filter --filter "FR*" --message "Testnachricht" --unattended
+python .\send_to_all_nodes.py --port COM7 --channel-index 1 --ack --delay 1.5 --timeout 60 --target-mode filter --filter "FR*" --message "Test message" --unattended --forcecfg
 ```
 
-Danach reicht fuer spaetere Starts oft einfach:
+After that, a plain run is usually enough:
 
 ```powershell
 python .\send_to_all_nodes.py
 ```
 
-Dann werden die Werte aus der CFG verwendet.
+## Config File Behavior
 
-## CFG-Verhalten
+- No config + parameters passed:
+  - A config can be created from those parameters.
+- Existing config + parameters passed:
+  - Parameters are applied for the current run.
+  - Whether the config is updated depends on `--forcecfg` / `--protectcfg`.
+- Existing config + no parameters passed:
+  - The script uses the config values.
+- No config + no parameters passed:
+  - The script shows an example command.
 
-- Existiert keine CFG und das Skript wird mit Parametern gestartet, wird die CFG erzeugt.
-- Existiert die CFG bereits und das Skript wird mit Parametern gestartet, werden diese Werte in die CFG uebernommen.
-- Wird das Skript ohne Parameter gestartet, gelten die Werte aus der CFG.
-- Gibt es weder CFG noch Parameter, zeigt das Skript ein Beispiel fuer einen gueltigen Erstaufruf.
-- Mit `--forcecfg` wird die CFG bei einem Lauf mit Parametern in jedem Fall erzeugt oder aktualisiert.
-- Mit `--protectcfg` wird die CFG bei einem Lauf mit Parametern nicht veraendert.
-- Mit `--clear` wird die CFG geloescht.
+## Config Control
 
-CFG loeschen:
+Use these switches to make config behavior explicit:
+
+- `--forcecfg`
+  - Always create or update the config when parameters are passed.
+- `--protectcfg`
+  - Never update the config for this run, even if parameters are passed.
+- `--clear`
+  - Delete the local config file and exit.
+
+Examples:
+
+```powershell
+python .\send_to_all_nodes.py --port COM7 --channel-index 1 --message "Hello" --forcecfg
+```
+
+```powershell
+python .\send_to_all_nodes.py --port COM7 --channel-index 0 --message "Private test" --protectcfg
+```
 
 ```powershell
 python .\send_to_all_nodes.py --clear
 ```
 
-CFG immer aktualisieren:
+## Target Selection
 
-```powershell
-python .\send_to_all_nodes.py --port COM7 --channel-index 1 --message "Hallo" --forcecfg
-```
+The script can send:
 
-CFG fuer einen Lauf schuetzen:
+- to all known nodes
+- to filtered nodes only
 
-```powershell
-python .\send_to_all_nodes.py --port COM7 --channel-index 0 --message "Test privat" --protectcfg
-```
-
-## Zielauswahl
-
-Das Skript kann an alle bekannten Nodes oder nur an gefilterte Ziele senden.
-
-Interaktiv:
+Interactive mode:
 
 ```powershell
 python .\send_to_all_nodes.py
 ```
 
-Dann fragt das Skript:
+You will be asked to choose:
 
-- `1` fuer alle bekannten Nodes
-- `2` fuer gefilterte Ziele
+- `1` for all known nodes
+- `2` for filtered sending
 
-Direkt per Parameter:
+Direct parameter examples:
 
 ```powershell
-python .\send_to_all_nodes.py --help
-python .\send_to_all_nodes.py --list-ports
-python .\send_to_all_nodes.py --port COM7
-python .\send_to_all_nodes.py --channel-index 1
 python .\send_to_all_nodes.py --target-mode all
 python .\send_to_all_nodes.py --target-mode filter --filter "FR*"
 python .\send_to_all_nodes.py --target-mode filter --filter "!55d8c9dc"
 python .\send_to_all_nodes.py --target-mode filter --filter "Rico"
 ```
 
-Filterregeln:
+Filter rules:
 
-- Mit Wildcards wie `FR*` oder `*mobil*` wird ueber Muster gesucht.
-- Ohne Wildcards reicht auch ein Teilstring, z. B. `Rico`.
-- Geprueft werden Node-ID, Kurzname und Langname.
+- With wildcards such as `FR*` or `*mobil*`, the filter is treated as a pattern.
+- Without wildcards, partial matches are allowed.
+- Matching is performed against node ID, short name, and long name.
 
-## Nachricht und unattended-Modus
+## Message and Unattended Mode
 
-Eine Standardnachricht kann per Parameter gesetzt und in die CFG geschrieben werden:
+You can store a default message in the config:
 
 ```powershell
-python .\send_to_all_nodes.py --message "Hallo zusammen"
+python .\send_to_all_nodes.py --message "Hello everyone" --forcecfg
 ```
 
-Unbeaufsichtigter Start ohne Rueckfragen:
+Run without prompts:
 
 ```powershell
 python .\send_to_all_nodes.py --unattended
 ```
 
-Typischer unattended-Aufruf:
+Typical unattended run:
 
 ```powershell
-python .\send_to_all_nodes.py --port COM7 --channel-index 1 --ack --target-mode filter --filter "FR*" --message "Hallo zusammen" --unattended
+python .\send_to_all_nodes.py --port COM7 --channel-index 1 --ack --target-mode filter --filter "FR*" --message "Hello everyone" --unattended --forcecfg
 ```
 
-Im unattended-Modus gilt:
+In unattended mode:
 
-- keine Rueckfrage zur Nachricht
-- keine Rueckfrage zur Zielauswahl
-- keine Rueckfrage vor dem Versand
-- fehlende Pflichtwerte muessen aus Parametern oder der CFG kommen
+- no message prompt
+- no target selection prompt
+- no send confirmation prompt
+- required values must come from parameters or the config
 
-## ACK-Auswertung
+## ACK Handling
 
-Mit `--ack` wartet das Skript pro Nachricht auf eine Rueckmeldung.
+With `--ack`, the script waits for a response per message.
 
-Moegliche Ausgaben:
+Possible outcomes:
 
-- `Received an ACK.`: Nachricht wurde bestaetigt.
-- `Versendet, aber nicht bestaetigt (nur implizites ACK).`: Nachricht wurde angestossen, aber nicht eindeutig bestaetigt.
-- `Received a NAK, error reason: ...`: Nachricht wurde negativ beantwortet.
-- `Fehler bei ... Kein ACK/NAK ...`: Timeout ohne Rueckmeldung.
+- `Received an ACK.`
+  - Delivery was acknowledged.
+- `Sent, but not confirmed (implicit ACK only).`
+  - The packet was sent, but not explicitly confirmed.
+- `Received a NAK, error reason: ...`
+  - Delivery failed with a negative acknowledgment.
+- `Error ... No ACK/NAK ...`
+  - Timeout without a response.
 
-Beispiel:
+Example:
 
 ```powershell
 python .\send_to_all_nodes.py --port COM7 --channel-index 1 --ack --delay 1.5 --timeout 60
 ```
 
-## Wichtige Optionen
+## Common Options
 
 ```powershell
+python .\send_to_all_nodes.py --help
+python .\send_to_all_nodes.py --list-ports
+python .\send_to_all_nodes.py --port COM7
+python .\send_to_all_nodes.py --channel-index 1
 python .\send_to_all_nodes.py --ack
 python .\send_to_all_nodes.py --no-ack
 python .\send_to_all_nodes.py --include-unmessageable
 python .\send_to_all_nodes.py --no-include-unmessageable
-python .\send_to_all_nodes.py --message "Hallo"
+python .\send_to_all_nodes.py --message "Hello"
 python .\send_to_all_nodes.py --unattended
 python .\send_to_all_nodes.py --no-unattended
 python .\send_to_all_nodes.py --forcecfg
@@ -174,6 +188,7 @@ python .\send_to_all_nodes.py --protectcfg
 python .\send_to_all_nodes.py --clear
 ```
 
-## Hinweis
+## Notes
 
-Das Skript ist fuer kontrollierte Direktnachrichten gedacht. Bitte beachte lokale Funkregeln, Duty-Cycle-Grenzen und den respektvollen Umgang mit anderen Nodes im Mesh.
+- This tool is intended for controlled direct-message workflows.
+- Please respect local radio regulations, duty-cycle limits, and other operators on the mesh.
