@@ -150,6 +150,19 @@ class ConfigLogic:
         return send_settings, listen_settings
 
     @staticmethod
+    def load_cfg(output_dir: Path, family: str) -> dict:
+        path = ConfigLogic.config_path(output_dir, family)
+        settings = (
+            ConfigLogic.default_listen_settings()
+            if family == "listen"
+            else ConfigLogic.default_send_settings()
+        )
+        specs = LISTEN_FIELDS if family == "listen" else SEND_FIELDS
+        if path.exists():
+            settings.update(ConfigLogic.coerce_loaded_values(path, specs))
+        return settings
+
+    @staticmethod
     def coerce_loaded_values(path: Path, specs: list[FieldSpec], section_name: str = SETTINGS_SECTION) -> dict:
         raw_values = ConfigLogic.load_section(path, section_name)
         loaded = {}
@@ -291,6 +304,13 @@ class ConfigLogic:
         listen_path.write_text(ConfigLogic.render_cfg("listen", listen_settings, script_path), encoding="utf-8")
         return send_path, listen_path
 
+    @staticmethod
+    def save_cfg(output_dir: Path, family: str, settings: dict, script_path: Path) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = ConfigLogic.config_path(output_dir, family)
+        path.write_text(ConfigLogic.render_cfg(family, settings, script_path), encoding="utf-8")
+        return path
+
 
 class MeshtasticConfigGUI:
     def __init__(self, root: tk.Tk) -> None:
@@ -309,6 +329,10 @@ class MeshtasticConfigGUI:
 
         self.send_preview = None
         self.listen_preview = None
+        self.form_notebook = None
+        self.preview_notebook = None
+        self.load_button = None
+        self.save_button = None
 
         self._build_layout()
         self.generate_preview()
@@ -333,9 +357,11 @@ class MeshtasticConfigGUI:
         ttk.Label(top_bar, text="Output Folder").grid(row=0, column=0, padx=(0, 8), sticky="w")
         ttk.Entry(top_bar, textvariable=self.output_dir_var).grid(row=0, column=1, sticky="ew")
         ttk.Button(top_bar, text="Browse", command=self.choose_output_directory).grid(row=0, column=2, padx=8)
-        ttk.Button(top_bar, text="Load Config", command=self.load_config).grid(row=0, column=3, padx=4)
+        self.load_button = ttk.Button(top_bar, text="Load Send CFG", command=self.load_config)
+        self.load_button.grid(row=0, column=3, padx=4)
         ttk.Button(top_bar, text="Generate Config", command=self.generate_preview).grid(row=0, column=4, padx=4)
-        ttk.Button(top_bar, text="Save Config", command=self.save_config).grid(row=0, column=5, padx=4)
+        self.save_button = ttk.Button(top_bar, text="Save Send CFG", command=self.save_config)
+        self.save_button.grid(row=0, column=5, padx=4)
 
         main_frame = ttk.Panedwindow(self.root, orient="horizontal")
         main_frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 8))
@@ -350,24 +376,25 @@ class MeshtasticConfigGUI:
         preview_container.columnconfigure(0, weight=1)
         preview_container.rowconfigure(0, weight=1)
 
-        notebook = ttk.Notebook(form_container)
-        notebook.grid(row=0, column=0, sticky="nsew")
+        self.form_notebook = ttk.Notebook(form_container)
+        self.form_notebook.grid(row=0, column=0, sticky="nsew")
 
-        send_tab = ttk.Frame(notebook, padding=10)
-        listen_tab = ttk.Frame(notebook, padding=10)
-        notebook.add(send_tab, text="Send CFG")
-        notebook.add(listen_tab, text="Listen CFG")
+        send_tab = ttk.Frame(self.form_notebook, padding=10)
+        listen_tab = ttk.Frame(self.form_notebook, padding=10)
+        self.form_notebook.add(send_tab, text="Send CFG")
+        self.form_notebook.add(listen_tab, text="Listen CFG")
+        self.form_notebook.bind("<<NotebookTabChanged>>", self._on_form_tab_changed)
 
         self._build_form(send_tab, self.send_specs, self.send_vars, columns=2)
         self._build_form(listen_tab, self.listen_specs, self.listen_vars, columns=2)
 
-        preview_notebook = ttk.Notebook(preview_container)
-        preview_notebook.grid(row=0, column=0, sticky="nsew")
+        self.preview_notebook = ttk.Notebook(preview_container)
+        self.preview_notebook.grid(row=0, column=0, sticky="nsew")
 
-        send_preview_tab = ttk.Frame(preview_notebook, padding=6)
-        listen_preview_tab = ttk.Frame(preview_notebook, padding=6)
-        preview_notebook.add(send_preview_tab, text=SEND_CFG_NAME)
-        preview_notebook.add(listen_preview_tab, text=LISTEN_CFG_NAME)
+        send_preview_tab = ttk.Frame(self.preview_notebook, padding=6)
+        listen_preview_tab = ttk.Frame(self.preview_notebook, padding=6)
+        self.preview_notebook.add(send_preview_tab, text=SEND_CFG_NAME)
+        self.preview_notebook.add(listen_preview_tab, text=LISTEN_CFG_NAME)
 
         self.send_preview = self._build_preview_text(send_preview_tab)
         self.listen_preview = self._build_preview_text(listen_preview_tab)
@@ -376,6 +403,7 @@ class MeshtasticConfigGUI:
         status_bar.grid(row=2, column=0, sticky="ew")
         status_bar.columnconfigure(0, weight=1)
         ttk.Label(status_bar, textvariable=self.status_var).grid(row=0, column=0, sticky="w")
+        self._update_action_labels()
 
     def _build_form(self, parent: ttk.Frame, specs: list[FieldSpec], variables: dict[str, tk.Variable], columns: int) -> None:
         for column in range(columns):
@@ -442,6 +470,26 @@ class MeshtasticConfigGUI:
         listen_settings["mode"] = "listen"
         return send_settings, listen_settings
 
+    def _active_family(self) -> str:
+        if self.form_notebook is None:
+            return "send"
+        current_index = self.form_notebook.index(self.form_notebook.select())
+        return "listen" if current_index == 1 else "send"
+
+    def _update_action_labels(self) -> None:
+        family = self._active_family()
+        label = "Listen CFG" if family == "listen" else "Send CFG"
+        if self.load_button is not None:
+            self.load_button.configure(text=f"Load {label}")
+        if self.save_button is not None:
+            self.save_button.configure(text=f"Save {label}")
+
+    def _on_form_tab_changed(self, _event=None) -> None:
+        family = self._active_family()
+        self._update_action_labels()
+        if self.preview_notebook is not None:
+            self.preview_notebook.select(1 if family == "listen" else 0)
+
     def generate_preview(self) -> None:
         try:
             send_settings, listen_settings = self._validated_all()
@@ -462,11 +510,14 @@ class MeshtasticConfigGUI:
     def load_config(self) -> None:
         try:
             output_dir = Path(self.output_dir_var.get()).expanduser()
-            send_settings, listen_settings = ConfigLogic.load_cfg_pair(output_dir)
-            self._set_values(self.send_specs, self.send_vars, send_settings)
-            self._set_values(self.listen_specs, self.listen_vars, listen_settings)
+            family = self._active_family()
+            settings = ConfigLogic.load_cfg(output_dir, family)
+            if family == "listen":
+                self._set_values(self.listen_specs, self.listen_vars, settings)
+            else:
+                self._set_values(self.send_specs, self.send_vars, settings)
             self.generate_preview()
-            self.status_var.set(f"Loaded cfg files from {output_dir}")
+            self.status_var.set(f"Loaded {family} cfg from {output_dir}")
         except Exception as exc:
             messagebox.showerror(APP_TITLE, f"Could not load config files:\n{exc}")
             self.status_var.set(f"Load failed: {exc}")
@@ -475,17 +526,19 @@ class MeshtasticConfigGUI:
         try:
             send_settings, listen_settings = self._validated_all()
             output_dir = Path(self.output_dir_var.get()).expanduser()
-            send_path, listen_path = ConfigLogic.save_cfg_files(
+            family = self._active_family()
+            settings = listen_settings if family == "listen" else send_settings
+            saved_path = ConfigLogic.save_cfg(
                 output_dir,
-                send_settings,
-                listen_settings,
+                family,
+                settings,
                 output_dir / "meshtastic_mass_com.py",
             )
             self.generate_preview()
-            self.status_var.set(f"Saved: {send_path.name} and {listen_path.name}")
+            self.status_var.set(f"Saved: {saved_path.name}")
             messagebox.showinfo(
                 APP_TITLE,
-                f"Config files written successfully:\n\n{send_path}\n{listen_path}",
+                f"Config file written successfully:\n\n{saved_path}",
             )
         except Exception as exc:
             messagebox.showerror(APP_TITLE, f"Could not save config files:\n{exc}")

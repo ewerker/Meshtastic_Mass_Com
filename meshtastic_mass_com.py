@@ -74,6 +74,42 @@ SETTING_TYPES = {
     "history_filter": "str",
     "history_limit": "int",
 }
+SEND_CONFIG_KEYS = (
+    "mode",
+    "port",
+    "channel_index",
+    "ack",
+    "include_unmessageable",
+    "delay",
+    "timeout",
+    "final_wait",
+    "target_mode",
+    "target_filter",
+    "selection",
+    "message",
+    "unattended",
+    "log_file",
+    "retry_implicit_ack",
+    "retry_nak",
+    "dry_run",
+    "history_file",
+    "history_filter",
+    "history_limit",
+)
+LISTEN_CONFIG_KEYS = (
+    "mode",
+    "port",
+    "timeout",
+    "listen_filter",
+    "listen_channel_index",
+    "listen_dm_only",
+    "listen_group_only",
+    "listen_text_only",
+    "log_file",
+    "history_file",
+    "history_filter",
+    "history_limit",
+)
 
 ANSI_RESET = "\033[0m"
 ANSI_BOLD = "\033[1m"
@@ -350,8 +386,29 @@ def history_path_for_family(config_family: str) -> Path:
     return LISTEN_HISTORY_PATH if config_family == "listen" else SEND_HISTORY_PATH
 
 
-def load_config(config_path: Path) -> dict:
-    settings, _sources = load_config_with_sources(config_path)
+def config_keys_for_family(config_family: str) -> tuple[str, ...]:
+    return LISTEN_CONFIG_KEYS if config_family == "listen" else SEND_CONFIG_KEYS
+
+
+def defaults_for_family(config_family: str) -> dict:
+    settings = DEFAULT_SETTINGS.copy()
+    settings["mode"] = "listen" if config_family == "listen" else "send"
+    return settings
+
+
+def persistable_settings(settings: dict, config_family: str) -> dict:
+    persisted = defaults_for_family(config_family)
+    for key in config_keys_for_family(config_family):
+        persisted[key] = settings.get(key, persisted[key])
+    if config_family == "listen":
+        persisted["mode"] = "listen"
+    elif persisted["mode"] == "listen":
+        persisted["mode"] = "send"
+    return persisted
+
+
+def load_config(config_path: Path, config_family: str | None = None) -> dict:
+    settings, _sources = load_config_with_sources(config_path, config_family)
     return settings
 
 
@@ -368,8 +425,9 @@ def parse_config_value(section: configparser.SectionProxy, key: str, value_type:
     return section.get(key)
 
 
-def load_config_with_sources(config_path: Path) -> tuple[dict, dict]:
-    settings = DEFAULT_SETTINGS.copy()
+def load_config_with_sources(config_path: Path, config_family: str | None = None) -> tuple[dict, dict]:
+    resolved_family = config_family or ("listen" if config_path == LISTEN_CONFIG_PATH else "send")
+    settings = defaults_for_family(resolved_family)
     sources = {key: "default" for key in DEFAULT_SETTINGS}
     if not config_path.exists():
         return settings, sources
@@ -380,7 +438,8 @@ def load_config_with_sources(config_path: Path) -> tuple[dict, dict]:
         return settings, sources
 
     section = parser[CONFIG_SECTION]
-    for key, value_type in SETTING_TYPES.items():
+    for key in config_keys_for_family(resolved_family):
+        value_type = SETTING_TYPES[key]
         if section.get(key, fallback=None) is None:
             continue
         settings[key] = parse_config_value(section, key, value_type)
@@ -418,7 +477,8 @@ def print_effective_parameters(settings: dict, mode_label: str, fields: list[tup
         print(f"  {format_source_label(source)} {key} = {format_effective_value(value)}")
 
 
-def config_file_values(settings: dict) -> dict[str, str]:
+def config_file_values(settings: dict, config_family: str) -> dict[str, str]:
+    settings = persistable_settings(settings, config_family)
     return {
         "mode": settings["mode"] or "send",
         "port": settings["port"] or "",
@@ -448,9 +508,12 @@ def config_file_values(settings: dict) -> dict[str, str]:
     }
 
 
-def render_config_text(settings: dict, config_path: Path) -> str:
-    config_family = "listen" if config_path == LISTEN_CONFIG_PATH else "send"
-    values = config_file_values(settings)
+def render_config_text(settings: dict, config_family_or_path) -> str:
+    if isinstance(config_family_or_path, Path):
+        config_family = "listen" if config_family_or_path == LISTEN_CONFIG_PATH else "send"
+    else:
+        config_family = str(config_family_or_path)
+    values = config_file_values(settings, config_family)
     active_modes = "listen" if config_family == "listen" else "send, broadcast, history"
     family_title = "Listen workflow" if config_family == "listen" else "Send workflow"
     example = example_command_for_family(config_family)
@@ -482,95 +545,121 @@ def render_config_text(settings: dict, config_path: Path) -> str:
         lines.extend(
             [
                 "# - This cfg is used by --listen or --mode listen.",
-                "# - Send-only options such as target_mode or retry_implicit_ack can still be stored here,",
-                "#   but they matter mainly if you later switch workflows via CLI for a single run.",
+                "# - Only listen-related keys are persisted here.",
+                "# - Send-mode parameters passed on the CLI affect only the current run and are not written to this cfg.",
             ]
         )
     else:
         lines.extend(
             [
                 "# - This cfg is used by default runs and by --mode send, --mode broadcast, and --mode history.",
-                "# - Listen-only options can still be stored here, but they are mainly relevant for temporary",
-                "#   one-off listen runs unless you maintain a dedicated listen cfg.",
+                "# - Only send/broadcast/history-related keys are persisted here.",
+                "# - Listen-mode parameters passed on the CLI affect only the current run and are not written to this cfg.",
             ]
         )
 
-    lines.extend(
-        [
-            "",
-            f"[{CONFIG_SECTION}]",
-            "",
-            "# Workflow",
-            f"# Stored mode for this cfg family. Typical default here: {'listen' if config_family == 'listen' else 'send'}.",
-            "# Allowed values: send | listen | broadcast | history",
-            f"mode = {values['mode']}",
-            "",
-            "# Connection",
-            "# Serial port such as COM7, /dev/ttyUSB0, or /dev/ttyACM0. Leave empty to auto-detect or ask.",
-            f"port = {values['port']}",
-            "# Channel index for direct messages or broadcasts, usually 0 or 1.",
-            f"channel_index = {values['channel_index']}",
-            "",
-            "# Sending reliability",
-            "# true waits for ACK/NAK for direct messages. Broadcast ignores this.",
-            f"ack = {values['ack']}",
-            "# true also tries nodes flagged as unmessageable.",
-            f"include_unmessageable = {values['include_unmessageable']}",
-            "# Delay in seconds between recipients or retries.",
-            f"delay = {values['delay']}",
-            "# Timeout in seconds for connection and ACK waiting.",
-            f"timeout = {values['timeout']}",
-            "# Extra wait in seconds after the last transmission when not waiting for ACKs.",
-            f"final_wait = {values['final_wait']}",
-            "# Retries after implicit ACK results.",
-            f"retry_implicit_ack = {values['retry_implicit_ack']}",
-            "# Retries after NAK results.",
-            f"retry_nak = {values['retry_nak']}",
-            "# true shows what would happen without transmitting.",
-            f"dry_run = {values['dry_run']}",
-            "",
-            "# Targeting",
-            "# all = every known node, filter = matching nodes only, select = choose from numbered list.",
-            f"target_mode = {values['target_mode']}",
-            "# Node filter for ID, short name, or long name. Wildcards such as FR* are supported.",
-            f"target_filter = {values['target_filter']}",
-            "# Number list or ranges from a displayed selection list, for example 1,3-5.",
-            f"selection = {values['selection']}",
-            "# Default text used for send or broadcast workflows.",
-            f"message = {values['message']}",
-            "# true skips confirmation prompts. Required values must then come from cfg or CLI.",
-            f"unattended = {values['unattended']}",
-            "",
-            "# Listen filters",
-            "# Sender filter for receive mode, for example FR* or !55d8c9dc.",
-            f"listen_filter = {values['listen_filter']}",
-            "# Only show received packets for this channel index. Empty = all channels.",
-            f"listen_channel_index = {values['listen_channel_index']}",
-            "# true shows only direct messages while listening.",
-            f"listen_dm_only = {values['listen_dm_only']}",
-            "# true shows only group or broadcast traffic while listening.",
-            f"listen_group_only = {values['listen_group_only']}",
-            "# true shows only text packets while listening.",
-            f"listen_text_only = {values['listen_text_only']}",
-            "",
-            "# Files",
-            "# Optional JSONL log file for send and listen activity.",
-            f"log_file = {values['log_file']}",
-            "# Optional JSONL history or inbox file.",
-            f"history_file = {values['history_file']}",
-            "# Filter applied by history mode when showing saved entries.",
-            f"history_filter = {values['history_filter']}",
-            "# Number of recent history entries to show in history mode.",
-            f"history_limit = {values['history_limit']}",
-            "",
-        ]
-    )
+    lines.extend(["", f"[{CONFIG_SECTION}]", ""])
+    if config_family == "listen":
+        lines.extend(
+            [
+                "# Workflow",
+                "# Stored mode for this cfg family. This file is always listen-focused.",
+                "# Allowed values here: listen",
+                "mode = listen",
+                "",
+                "# Connection",
+                "# Serial port such as COM7, /dev/ttyUSB0, or /dev/ttyACM0. Leave empty to auto-detect or ask.",
+                f"port = {values['port']}",
+                "# Timeout in seconds for the connection attempt.",
+                f"timeout = {values['timeout']}",
+                "",
+                "# Listen filters",
+                "# Sender filter for receive mode, for example FR* or !55d8c9dc.",
+                f"listen_filter = {values['listen_filter']}",
+                "# Only show received packets for this channel index. Empty = all channels.",
+                f"listen_channel_index = {values['listen_channel_index']}",
+                "# true shows only direct messages while listening.",
+                f"listen_dm_only = {values['listen_dm_only']}",
+                "# true shows only group or broadcast traffic while listening.",
+                f"listen_group_only = {values['listen_group_only']}",
+                "# true shows only text packets while listening.",
+                f"listen_text_only = {values['listen_text_only']}",
+                "",
+                "# Files",
+                "# Optional JSONL log file for listen activity.",
+                f"log_file = {values['log_file']}",
+                "# Optional JSONL history or inbox file for listen/history workflows.",
+                f"history_file = {values['history_file']}",
+                "# Filter applied by history mode when showing saved entries.",
+                f"history_filter = {values['history_filter']}",
+                "# Number of recent history entries to show in history mode.",
+                f"history_limit = {values['history_limit']}",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "# Workflow",
+                f"# Stored mode for this cfg family. Typical default here: {values['mode']}.",
+                "# Allowed values here: send | broadcast | history",
+                f"mode = {values['mode']}",
+                "",
+                "# Connection",
+                "# Serial port such as COM7, /dev/ttyUSB0, or /dev/ttyACM0. Leave empty to auto-detect or ask.",
+                f"port = {values['port']}",
+                "# Channel index for direct messages or broadcasts, usually 0 or 1.",
+                f"channel_index = {values['channel_index']}",
+                "",
+                "# Sending reliability",
+                "# true waits for ACK/NAK for direct messages. Broadcast ignores this.",
+                f"ack = {values['ack']}",
+                "# true also tries nodes flagged as unmessageable.",
+                f"include_unmessageable = {values['include_unmessageable']}",
+                "# Delay in seconds between recipients or retries.",
+                f"delay = {values['delay']}",
+                "# Timeout in seconds for connection and ACK waiting.",
+                f"timeout = {values['timeout']}",
+                "# Extra wait in seconds after the last transmission when not waiting for ACKs.",
+                f"final_wait = {values['final_wait']}",
+                "# Retries after implicit ACK results.",
+                f"retry_implicit_ack = {values['retry_implicit_ack']}",
+                "# Retries after NAK results.",
+                f"retry_nak = {values['retry_nak']}",
+                "# true shows what would happen without transmitting.",
+                f"dry_run = {values['dry_run']}",
+                "",
+                "# Targeting",
+                "# all = every known node, filter = matching nodes only, select = choose from numbered list.",
+                f"target_mode = {values['target_mode']}",
+                "# Node filter for ID, short name, or long name. Wildcards such as FR* are supported.",
+                f"target_filter = {values['target_filter']}",
+                "# Number list or ranges from a displayed selection list, for example 1,3-5.",
+                f"selection = {values['selection']}",
+                "# Default text used for send or broadcast workflows.",
+                f"message = {values['message']}",
+                "# true skips confirmation prompts. Required values must then come from cfg or CLI.",
+                f"unattended = {values['unattended']}",
+                "",
+                "# Files",
+                "# Optional JSONL log file for send/broadcast activity.",
+                f"log_file = {values['log_file']}",
+                "# Optional JSONL history or inbox file for send/history workflows.",
+                f"history_file = {values['history_file']}",
+                "# Filter applied by history mode when showing saved entries.",
+                f"history_filter = {values['history_filter']}",
+                "# Number of recent history entries to show in history mode.",
+                f"history_limit = {values['history_limit']}",
+                "",
+            ]
+        )
     return "\n".join(lines)
 
 
-def save_config(settings: dict, config_path: Path) -> None:
+def save_config(settings: dict, config_path: Path, config_family: str | None = None) -> None:
+    resolved_family = config_family or ("listen" if config_path == LISTEN_CONFIG_PATH else "send")
     with config_path.open("w", encoding="utf-8") as config_file:
-        config_file.write(render_config_text(settings, config_path))
+        config_file.write(render_config_text(settings, resolved_family))
 
 
 def collect_cli_overrides(args: argparse.Namespace) -> dict:
@@ -633,14 +722,14 @@ def resolve_settings(args: argparse.Namespace) -> dict | None:
         print(example_command_for_family(config_family))
         return None
 
-    settings, sources = load_config_with_sources(config_path)
+    settings, sources = load_config_with_sources(config_path, config_family)
 
     if cli_overrides:
         settings.update(cli_overrides)
         for key in cli_overrides:
             sources[key] = "cmd"
         if should_write_cfg:
-            save_config(settings, config_path)
+            save_config(settings, config_path, config_family)
             if config_exists:
                 print(colorize(f"Configuration updated: {config_path}", "green"))
             else:
