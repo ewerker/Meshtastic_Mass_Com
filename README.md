@@ -1,6 +1,9 @@
 # Meshtastic_Mass_Com
 
+Current version: `0.6.1`
+
 English documentation. German version: [README.de.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\README.de.md)
+Release notes: [CHANGELOG.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\CHANGELOG.md)
 
 Copyright (c) 2026 Frank Richter, [w-2.de](https://w-2.de)
 

@@ -18,6 +18,7 @@ from pathlib import Path
 from meshtastic.serial_interface import SerialInterface
 from pubsub import pub
 from serial.tools import list_ports
+from meshtastic_mass_com_version import APP_NAME, APP_VERSION
 
 SCRIPT_PATH = Path(__file__)
 SCRIPT_STEM = SCRIPT_PATH.stem
@@ -201,7 +202,12 @@ def colorize(text: str, color: str | None = None, *, bold: bool = False) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Communicate with Meshtastic through direct messages, group broadcasts, live listening, logging, and local history."
+        description=f"{APP_NAME} v{APP_VERSION} - communicate with Meshtastic through direct messages, group broadcasts, live listening, logging, and local history."
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {APP_VERSION}",
     )
     parser.add_argument(
         "--mode",
@@ -599,6 +605,7 @@ def render_config_text(settings: dict, config_family_or_path) -> str:
 
     lines = [
         f"# Meshtastic_Mass_Com - {family_title} configuration",
+        f"# Version: {APP_VERSION}",
         "# Copyright (c) 2026 Frank Richter, https://w-2.de",
         "# SPDX-License-Identifier: MIT",
         "#",

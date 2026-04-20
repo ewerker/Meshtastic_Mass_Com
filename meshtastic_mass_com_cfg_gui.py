@@ -10,8 +10,9 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from meshtastic_mass_com_version import APP_NAME, APP_VERSION
 
-APP_TITLE = "Meshtastic_Mass_Com Config Generator"
+APP_TITLE = f"{APP_NAME} Config Generator v{APP_VERSION}"
 SCRIPT_DIR = Path(__file__).resolve().parent
 SEND_CFG_NAME = "meshtastic_mass_com.send.cfg"
 LISTEN_CFG_NAME = "meshtastic_mass_com.listen.cfg"
