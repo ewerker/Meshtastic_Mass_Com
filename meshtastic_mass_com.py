@@ -1752,6 +1752,11 @@ def send_autoresponse(
     if channel_index is None:
         channel_index = 0
     recipient_label = record.get("from_label") or recipient_id
+    channel_name = record.get("channel_name")
+    if channel_name:
+        channel_text = f"{channel_index}:{channel_name}"
+    else:
+        channel_text = str(channel_index)
     result = "sent_without_ack"
     packet_id = "unknown"
     if settings["ack"]:
@@ -1773,6 +1778,12 @@ def send_autoresponse(
         )
         result = ack_kind
         color = "green" if ack_kind == "ack" else "yellow" if ack_kind == "implicit_ack" else "red"
+        print(
+            colorize(
+                f"Sent to {recipient_label} ({recipient_id}) on ch={channel_text}: {reply_text} [autoresponder]",
+                "cyan",
+            )
+        )
         print(colorize(f"{ack_message} {recipient_label} ({recipient_id}), packet ID {packet_id} [autoresponder]", color))
     else:
         packet = interface.sendText(
@@ -1784,7 +1795,7 @@ def send_autoresponse(
         packet_id = getattr(packet, "id", "unknown")
         print(
             colorize(
-                f"Sent to {recipient_label} ({recipient_id}), packet ID {packet_id} [autoresponder]",
+                f"Sent to {recipient_label} ({recipient_id}) on ch={channel_text}: {reply_text} [autoresponder], packet ID {packet_id}",
                 "cyan",
             )
         )
