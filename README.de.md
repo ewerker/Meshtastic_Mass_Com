@@ -2,7 +2,7 @@
 
 Deutsche Dokumentation. English version: [README.md](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\README.md)
 
-Kleines Python-Werkzeug fuer Meshtastic, das Direktnachrichten an bekannte Nodes sendet und zusaetzlich eingehenden Verkehr mitlesen kann, inklusive Filterung, ACK-Auswertung, Logging, unattended-Modus und lokaler Konfigurationsdatei.
+Kleines Python-Werkzeug fuer Meshtastic, das Direktnachrichten an bekannte Nodes sendet und zusaetzlich eingehenden Verkehr mitlesen kann, inklusive Filterung, ACK-Auswertung, Logging, unattended-Modus und getrennten lokalen Konfigurationsdateien fuer Senden und Lauschen.
 
 ## Funktionen
 
@@ -15,7 +15,10 @@ Kleines Python-Werkzeug fuer Meshtastic, das Direktnachrichten an bekannte Nodes
 - Kann bei implizitem ACK oder NAK automatisch erneut senden
 - Kann eingehende Pakete live mit Filtern anzeigen
 - Kann Sende- und Empfangsdaten in eine lokale JSONL-Datei schreiben
-- Speichert Laufzeitwerte in einer lokalen `.cfg`-Datei
+- Kann echte Gruppen-/Broadcast-Nachrichten auf einem gewaehlten Kanal senden
+- Kann einen Dry-Run ohne Aussendung ausfuehren
+- Kann eine lokale History/Inbox pflegen und spaeter anzeigen
+- Speichert Laufzeitwerte in getrennten `.cfg`-Dateien fuer Senden und Lauschen
 - Unterstuetzt unbeaufsichtigte Laeufe ohne Rueckfragen
 - Kann die Konfigurationsdatei gezielt schuetzen oder bewusst aktualisieren
 
@@ -36,12 +39,21 @@ python -m pip install meshtastic pyserial
 ## Dateien
 
 - Skript: [send_to_all_nodes.py](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.py)
-- Lokale Konfiguration: [send_to_all_nodes.cfg](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.cfg)
+- Sende-Konfiguration: [send_to_all_nodes.send.cfg](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.send.cfg)
+- Listen-Konfiguration: [send_to_all_nodes.listen.cfg](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.listen.cfg)
+- History-Datei: [send_to_all_nodes.history.jsonl](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.history.jsonl)
 - Englische Dokumentation: [README.md](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\README.md)
 
 ## Erster Start
 
-Wenn noch keine Konfigurationsdatei existiert, sollte das Skript einmal mit Parametern gestartet werden, damit eine CFG erzeugt werden kann.
+Wenn noch keine passende Konfigurationsdatei existiert, sollte das Skript einmal mit Parametern gestartet werden, damit eine CFG erzeugt werden kann.
+
+Regeln fuer die CFG-Auswahl:
+
+- Ohne Parameter oder mit `--mode send`, `--mode broadcast`, `--mode history`
+  - Es wird die Sende-CFG `send_to_all_nodes.send.cfg` verwendet
+- Mit `--listen` oder `--mode listen`
+  - Es wird die Listen-CFG `send_to_all_nodes.listen.cfg` verwendet
 
 Beispiel:
 
@@ -57,14 +69,14 @@ python .\send_to_all_nodes.py
 
 ## Verhalten der Konfigurationsdatei
 
-- Keine CFG + Parameter uebergeben:
-  - Aus den Parametern kann eine CFG erzeugt werden.
-- Vorhandene CFG + Parameter uebergeben:
+- Keine aktive CFG + Parameter uebergeben:
+  - Aus den Parametern kann die aktive CFG erzeugt werden.
+- Vorhandene aktive CFG + Parameter uebergeben:
   - Die Parameter gelten fuer diesen Lauf.
-  - Ob die CFG aktualisiert wird, haengt von `--forcecfg` / `--protectcfg` ab.
-- Vorhandene CFG + keine Parameter:
-  - Das Skript verwendet die Werte aus der CFG.
-- Keine CFG + keine Parameter:
+  - Ob die aktive CFG aktualisiert wird, haengt von `--forcecfg` / `--protectcfg` ab.
+- Vorhandene aktive CFG + keine Parameter:
+  - Das Skript verwendet die Werte aus der aktiven CFG.
+- Keine aktive CFG + keine Parameter:
   - Das Skript zeigt ein Beispiel fuer einen gueltigen Erstaufruf.
 
 ## Steuerung der CFG
@@ -72,24 +84,36 @@ python .\send_to_all_nodes.py
 Diese Schalter machen das Verhalten eindeutig:
 
 - `--forcecfg`
-  - Erzeugt oder aktualisiert die CFG immer, wenn Parameter uebergeben werden.
+  - Erzeugt oder aktualisiert die aktive CFG immer, wenn Parameter uebergeben werden.
 - `--protectcfg`
-  - Veraendert die CFG in diesem Lauf niemals, auch wenn Parameter uebergeben werden.
+  - Veraendert die aktive CFG in diesem Lauf niemals, auch wenn Parameter uebergeben werden.
 - `--clear`
-  - Loescht die lokale CFG und beendet sich danach.
+  - Loescht die aktive CFG und beendet sich danach.
 
 Beispiele:
+
+- Sende-CFG loeschen:
+
+```powershell
+python .\send_to_all_nodes.py --clear
+```
+
+- Listen-CFG loeschen:
+
+```powershell
+python .\send_to_all_nodes.py --listen --clear
+```
+
+Sendeeinstellungen in der Sende-CFG speichern:
 
 ```powershell
 python .\send_to_all_nodes.py --port COM7 --channel-index 1 --message "Hallo" --forcecfg
 ```
 
-```powershell
-python .\send_to_all_nodes.py --port COM7 --channel-index 0 --message "Privater Test" --protectcfg
-```
+Listen-Einstellungen in der Listen-CFG speichern:
 
 ```powershell
-python .\send_to_all_nodes.py --clear
+python .\send_to_all_nodes.py --listen --port COM7 --listen-filter "FR*" --text-only --forcecfg
 ```
 
 ## Zielauswahl
@@ -224,6 +248,47 @@ python .\send_to_all_nodes.py --mode send --log-file .\meshtastic_log.jsonl
 python .\send_to_all_nodes.py --listen --log-file .\meshtastic_log.jsonl
 ```
 
+## Broadcast-Modus
+
+Im Broadcast-Modus wird genau eine Nachricht auf den gewaehlten Kanal gesendet, statt eine DM-Schleife zu verwenden.
+
+Beispiele:
+
+```powershell
+python .\send_to_all_nodes.py --mode broadcast --port COM7 --channel-index 0 --message "Hallo private Gruppe"
+python .\send_to_all_nodes.py --broadcast --port COM7 --channel-index 1 --message "Hallo LongFast"
+```
+
+Hinweise:
+
+- Der Broadcast-Modus ignoriert `--ack`
+- Er sendet genau einmal auf dem gewaehlten Kanal
+- Das ist meist der richtige Modus, wenn die Nachricht im Gruppen-/Kanalchat erscheinen soll
+
+## Dry-Run
+
+Mit `--dry-run` kann geprueft werden, was gesendet wuerde, ohne wirklich Funkpakete abzusetzen.
+
+Beispiele:
+
+```powershell
+python .\send_to_all_nodes.py --mode send --port COM7 --target-mode select --filter "FR*" --selection "1,3" --message "Nur Vorschau" --dry-run
+python .\send_to_all_nodes.py --mode broadcast --port COM7 --channel-index 1 --message "Vorschau Gruppenpost" --dry-run
+```
+
+## History
+
+Das Skript fuehrt eine lokale History-Datei fuer empfangene Pakete und gesendete Nachrichten. Diese kann spaeter auch ohne Geraet angezeigt werden.
+
+Beispiele:
+
+```powershell
+python .\send_to_all_nodes.py --mode history
+python .\send_to_all_nodes.py --history --history-limit 50
+python .\send_to_all_nodes.py --history --history-filter "Naunhof"
+python .\send_to_all_nodes.py --history --history-file .\logs\history.jsonl
+```
+
 ## Beispiel-Workflows
 
 ### Schnelle Alltagsnutzung
@@ -244,6 +309,12 @@ Auf `COM7` lauschen und nur Textverkehr anzeigen:
 
 ```powershell
 python .\send_to_all_nodes.py --listen --port COM7 --text-only
+```
+
+Einmal in den Kanalchat posten statt Direktnachrichten zu verschicken:
+
+```powershell
+python .\send_to_all_nodes.py --mode broadcast --port COM7 --channel-index 1 --message "Hallo Gruppe"
 ```
 
 ### Gefilterte Sende-Workflows
@@ -320,6 +391,12 @@ Dauerhaft lauschen und passende Pakete in ein gemeinsames Log schreiben:
 python .\send_to_all_nodes.py --listen --port COM7 --text-only --log-file .\logs\listen_log.jsonl
 ```
 
+Beim Lauschen zusaetzlich eine separate lokale History-Datei pflegen:
+
+```powershell
+python .\send_to_all_nodes.py --listen --port COM7 --text-only --history-file .\logs\history.jsonl
+```
+
 ### CFG-zentrierte Workflows
 
 Ein wiederverwendbares unattended-Profil erzeugen oder aktualisieren:
@@ -340,6 +417,12 @@ Temporar im Listen-Modus mit anderen Werten arbeiten, ohne die CFG zu veraendern
 python .\send_to_all_nodes.py --listen --port COM7 --listen-filter "FR*" --dm-only --text-only --protectcfg
 ```
 
+Einen Broadcast nur testen, ohne zu senden und ohne die CFG zu veraendern:
+
+```powershell
+python .\send_to_all_nodes.py --mode broadcast --port COM7 --channel-index 0 --message "Test Gruppe" --dry-run --protectcfg
+```
+
 ## Wichtige Optionen Referenz
 
 ```powershell
@@ -356,12 +439,18 @@ python .\send_to_all_nodes.py --selection "1,3-5"
 python .\send_to_all_nodes.py --retry-implicit-ack 1
 python .\send_to_all_nodes.py --retry-nak 1
 python .\send_to_all_nodes.py --listen
+python .\send_to_all_nodes.py --broadcast
+python .\send_to_all_nodes.py --history
 python .\send_to_all_nodes.py --listen-filter "FR*"
 python .\send_to_all_nodes.py --listen-channel-index 1
 python .\send_to_all_nodes.py --dm-only
 python .\send_to_all_nodes.py --group-only
 python .\send_to_all_nodes.py --text-only
 python .\send_to_all_nodes.py --log-file .\meshtastic_log.jsonl
+python .\send_to_all_nodes.py --history-file .\meshtastic_history.jsonl
+python .\send_to_all_nodes.py --history-filter "Naunhof"
+python .\send_to_all_nodes.py --history-limit 50
+python .\send_to_all_nodes.py --dry-run
 python .\send_to_all_nodes.py --unattended
 python .\send_to_all_nodes.py --no-unattended
 python .\send_to_all_nodes.py --forcecfg

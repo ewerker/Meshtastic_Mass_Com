@@ -2,7 +2,7 @@
 
 English documentation. German version: [README.de.md](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\README.de.md)
 
-Small Python utility for Meshtastic that sends direct messages to known nodes and can also listen for incoming traffic, with filtering, ACK handling, logging, unattended mode, and a local config file.
+Small Python utility for Meshtastic that sends direct messages to known nodes and can also listen for incoming traffic, with filtering, ACK handling, logging, unattended mode, and separate local config files for send and listen workflows.
 
 ## Features
 
@@ -15,7 +15,10 @@ Small Python utility for Meshtastic that sends direct messages to known nodes an
 - Can retry after implicit ACKs or NAKs
 - Can listen for incoming packets with sender/channel/scope/content filters
 - Can write send and listen activity to a local JSONL log file
-- Stores runtime settings in a local `.cfg` file
+- Can send a real group/broadcast message on a selected channel
+- Can run in dry-run mode without transmitting
+- Can keep a local history/inbox and show recent entries later
+- Stores runtime settings in separate send/listen `.cfg` files
 - Supports unattended runs without prompts
 - Can protect the config from changes or force config updates explicitly
 
@@ -36,12 +39,21 @@ python -m pip install meshtastic pyserial
 ## Files
 
 - Script: [send_to_all_nodes.py](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.py)
-- Local config: [send_to_all_nodes.cfg](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.cfg)
+- Send config: [send_to_all_nodes.send.cfg](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.send.cfg)
+- Listen config: [send_to_all_nodes.listen.cfg](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.listen.cfg)
+- History file: [send_to_all_nodes.history.jsonl](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\send_to_all_nodes.history.jsonl)
 - German documentation: [README.de.md](C:\Users\richt\Documents\Codex\2026-04-19-installiere-mir-phyton\README.de.md)
 
 ## First Run
 
-If no config file exists yet, start the script once with parameters so it can create one.
+If no matching config file exists yet, start the script once with parameters so it can create one.
+
+Config selection rules:
+
+- No parameters, or `--mode send`, `--mode broadcast`, `--mode history`
+  - Use the send config: `send_to_all_nodes.send.cfg`
+- `--listen` or `--mode listen`
+  - Use the listen config: `send_to_all_nodes.listen.cfg`
 
 Example:
 
@@ -57,14 +69,14 @@ python .\send_to_all_nodes.py
 
 ## Config File Behavior
 
-- No config + parameters passed:
-  - A config can be created from those parameters.
-- Existing config + parameters passed:
+- No active config + parameters passed:
+  - The active config can be created from those parameters.
+- Existing active config + parameters passed:
   - Parameters are applied for the current run.
-  - Whether the config is updated depends on `--forcecfg` / `--protectcfg`.
-- Existing config + no parameters passed:
-  - The script uses the config values.
-- No config + no parameters passed:
+  - Whether the active config is updated depends on `--forcecfg` / `--protectcfg`.
+- Existing active config + no parameters passed:
+  - The script uses the values from the active config.
+- No active config + no parameters passed:
   - The script shows an example command.
 
 ## Config Control
@@ -72,24 +84,36 @@ python .\send_to_all_nodes.py
 Use these switches to make config behavior explicit:
 
 - `--forcecfg`
-  - Always create or update the config when parameters are passed.
+  - Always create or update the active config when parameters are passed.
 - `--protectcfg`
-  - Never update the config for this run, even if parameters are passed.
+  - Never update the active config for this run, even if parameters are passed.
 - `--clear`
-  - Delete the local config file and exit.
+  - Delete the active config file and exit.
 
 Examples:
+
+- Clear send config:
+
+```powershell
+python .\send_to_all_nodes.py --clear
+```
+
+- Clear listen config:
+
+```powershell
+python .\send_to_all_nodes.py --listen --clear
+```
+
+Store send settings in the send config:
 
 ```powershell
 python .\send_to_all_nodes.py --port COM7 --channel-index 1 --message "Hello" --forcecfg
 ```
 
-```powershell
-python .\send_to_all_nodes.py --port COM7 --channel-index 0 --message "Private test" --protectcfg
-```
+Store listen settings in the listen config:
 
 ```powershell
-python .\send_to_all_nodes.py --clear
+python .\send_to_all_nodes.py --listen --port COM7 --listen-filter "FR*" --text-only --forcecfg
 ```
 
 ## Target Selection
@@ -224,6 +248,47 @@ python .\send_to_all_nodes.py --mode send --log-file .\meshtastic_log.jsonl
 python .\send_to_all_nodes.py --listen --log-file .\meshtastic_log.jsonl
 ```
 
+## Broadcast Mode
+
+Use broadcast mode to send one message to the selected channel instead of a direct-message loop.
+
+Examples:
+
+```powershell
+python .\send_to_all_nodes.py --mode broadcast --port COM7 --channel-index 0 --message "Hello private group"
+python .\send_to_all_nodes.py --broadcast --port COM7 --channel-index 1 --message "Hello LongFast"
+```
+
+Notes:
+
+- Broadcast mode ignores `--ack`
+- Broadcast mode sends once to the selected channel
+- This is usually the right mode when you want the message to appear in the group/channel chat
+
+## Dry Run
+
+Use `--dry-run` to preview what would be sent without transmitting any packets.
+
+Examples:
+
+```powershell
+python .\send_to_all_nodes.py --mode send --port COM7 --target-mode select --filter "FR*" --selection "1,3" --message "Preview only" --dry-run
+python .\send_to_all_nodes.py --mode broadcast --port COM7 --channel-index 1 --message "Preview group post" --dry-run
+```
+
+## History
+
+The script stores a local history file for received packets and sent messages. You can review it later without connecting to the device.
+
+Examples:
+
+```powershell
+python .\send_to_all_nodes.py --mode history
+python .\send_to_all_nodes.py --history --history-limit 50
+python .\send_to_all_nodes.py --history --history-filter "Naunhof"
+python .\send_to_all_nodes.py --history --history-file .\logs\history.jsonl
+```
+
 ## Example Workflows
 
 ### Quick Everyday Use
@@ -244,6 +309,12 @@ Listen on `COM7` and only show text traffic:
 
 ```powershell
 python .\send_to_all_nodes.py --listen --port COM7 --text-only
+```
+
+Post once to the channel chat instead of sending DMs:
+
+```powershell
+python .\send_to_all_nodes.py --mode broadcast --port COM7 --channel-index 1 --message "Hello group"
 ```
 
 ### Filtered Send Workflows
@@ -320,6 +391,12 @@ Listen continuously and append all matching packets to a shared log:
 python .\send_to_all_nodes.py --listen --port COM7 --text-only --log-file .\logs\listen_log.jsonl
 ```
 
+Keep a separate local history file while listening:
+
+```powershell
+python .\send_to_all_nodes.py --listen --port COM7 --text-only --history-file .\logs\history.jsonl
+```
+
 ### Config-Centered Workflows
 
 Create or refresh a reusable unattended profile:
@@ -340,6 +417,12 @@ Listen with temporary settings but keep the saved config untouched:
 python .\send_to_all_nodes.py --listen --port COM7 --listen-filter "FR*" --dm-only --text-only --protectcfg
 ```
 
+Preview a broadcast without changing the config or transmitting:
+
+```powershell
+python .\send_to_all_nodes.py --mode broadcast --port COM7 --channel-index 0 --message "Test group" --dry-run --protectcfg
+```
+
 ## Common Options Reference
 
 ```powershell
@@ -356,12 +439,18 @@ python .\send_to_all_nodes.py --selection "1,3-5"
 python .\send_to_all_nodes.py --retry-implicit-ack 1
 python .\send_to_all_nodes.py --retry-nak 1
 python .\send_to_all_nodes.py --listen
+python .\send_to_all_nodes.py --broadcast
+python .\send_to_all_nodes.py --history
 python .\send_to_all_nodes.py --listen-filter "FR*"
 python .\send_to_all_nodes.py --listen-channel-index 1
 python .\send_to_all_nodes.py --dm-only
 python .\send_to_all_nodes.py --group-only
 python .\send_to_all_nodes.py --text-only
 python .\send_to_all_nodes.py --log-file .\meshtastic_log.jsonl
+python .\send_to_all_nodes.py --history-file .\meshtastic_history.jsonl
+python .\send_to_all_nodes.py --history-filter "Naunhof"
+python .\send_to_all_nodes.py --history-limit 50
+python .\send_to_all_nodes.py --dry-run
 python .\send_to_all_nodes.py --unattended
 python .\send_to_all_nodes.py --no-unattended
 python .\send_to_all_nodes.py --forcecfg
