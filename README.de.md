@@ -1,6 +1,6 @@
 # Meshtastic_Mass_Com
 
-Aktuelle Version: `0.7.0`
+Aktuelle Version: `0.7.3`
 
 Deutsche Dokumentation. English version: [README.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\README.md)
 Release Notes: [CHANGELOG.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\CHANGELOG.md)
@@ -8,6 +8,38 @@ Release Notes: [CHANGELOG.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\CHA
 Copyright (c) 2026 Frank Richter, [w-2.de](https://w-2.de)
 
 Kleines Python-Werkzeug fuer umfassende Meshtastic-Kommunikation: Direktnachrichten, Gruppen-Broadcasts, Live-Mitschnitt, Logging, History und getrennte lokale Konfigurationsdateien fuer Senden und Lauschen.
+
+## Ueberblick
+
+Meshtastic_Mass_Com richtet sich an Nutzer, die fuer wiederkehrende Meshtastic-Kommunikation mehr Kontrolle brauchen als die Standard-App oder ein paar einzelne CLI-Befehle normalerweise bieten.
+
+Besonders hilfreich ist das Tool, wenn du:
+
+- dieselbe Nachricht an viele bekannte Nodes mit Filterung und Wiederholungen senden willst
+- dauerhaft mithoeren und dabei sinnvoll filtern und lokal loggen moechtest
+- Senden, Lauschen und Autoresponder-Verhalten getrennt in wiederverwendbaren CFG-Dateien pflegen willst
+- Feld-, Vereins-, Relay- oder Testablaeufe reproduzierbar starten willst, ohne jedes Mal lange Befehle neu zusammenzubauen
+
+Das Tool passt gut, wenn du oft denkst:
+
+- "Ich will an eine gefilterte Teilmenge senden, nicht nur an einen einzelnen Node."
+- "Ich will einen Listener mit Logs, History und kleinem Autoresponder."
+- "Ich will das Verhalten lieber in CFG-Dateien pflegen als immer wieder lange Parameter neu tippen."
+
+Weniger wichtig ist es eher dann, wenn du nur:
+
+- gelegentlich normal in der offiziellen Meshtastic-App chatten willst
+- ab und zu eine einzelne Nachricht manuell sendest
+- keine Filter, keine Logs, keine History und kein wiederverwendbares Verhalten brauchst
+
+## Typische Einsatzzwecke
+
+- Direktnachrichten an alle bekannten oder an gefilterte Empfaenger senden
+- Einmalig in einen Kanalchat wie eine private Gruppe oder LongFast senden
+- Einen Live-Listener mit Kanal-, Absender-, Scope- und Textfiltern betreiben
+- Eine lokale JSONL-Aktivitaetsdatei plus eine getrennte History/Inbox pflegen
+- CFG-gesteuerte Autoresponder-Regeln fuer bestimmte Absender oder Triggertexte verwenden
+- Geaenderte CFG-Dateien im Listenbetrieb nachladen, ohne den ganzen Ablauf neu zu starten
 
 ## Funktionen
 

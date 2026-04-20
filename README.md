@@ -1,6 +1,6 @@
 # Meshtastic_Mass_Com
 
-Current version: `0.7.0`
+Current version: `0.7.3`
 
 English documentation. German version: [README.de.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\README.de.md)
 Release notes: [CHANGELOG.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\CHANGELOG.md)
@@ -8,6 +8,38 @@ Release notes: [CHANGELOG.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\CHA
 Copyright (c) 2026 Frank Richter, [w-2.de](https://w-2.de)
 
 Small Python utility for Meshtastic communication workflows: direct messages, group broadcasts, live listening, logging, history, and separate local config files for send and listen workflows.
+
+## Overview
+
+Meshtastic_Mass_Com is meant for people who want more control over recurring Meshtastic communication tasks than the standard app or a few one-off CLI commands usually provide.
+
+It is especially useful if you want to:
+
+- send the same message to many known nodes with filtering and retries
+- listen continuously with practical filters and local logging
+- separate send, listen, and autoresponder behavior into reusable cfg files
+- run repeatable field, club, relay, or test workflows without rebuilding commands every time
+
+The tool is probably a good fit if you often think:
+
+- "I want to send to a filtered subset of nodes, not just one."
+- "I want a listener with logs, history, and a small autoresponder."
+- "I want to tweak behavior in cfg files instead of editing long commands again and again."
+
+The tool is probably not the main thing you need if you only:
+
+- want occasional normal chat in the official Meshtastic app
+- send one message manually every now and then
+- do not need filtering, logging, history, or reusable automation-like behavior
+
+## Typical Workflows
+
+- Send a direct message to all known or filtered recipients.
+- Broadcast once into a channel chat such as a private group or LongFast.
+- Run a live listener with channel, sender, scope, and text filtering.
+- Keep a local JSONL activity log plus a separate local history/inbox.
+- Use cfg-driven autoresponder rules for specific senders or trigger texts.
+- Let the listener reload updated cfg files without restarting the whole workflow.
 
 ## Features
 

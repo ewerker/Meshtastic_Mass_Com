@@ -8,6 +8,13 @@ The format is inspired by Keep a Changelog and uses project release tags where a
 
 - Reserved for upcoming changes before the next tagged release.
 
+## [0.7.3] - 2026-04-20
+
+### Changed
+
+- Expanded the English and German README introductions with clearer purpose, audience fit, and typical workflow overview sections.
+- Updated the visible documentation version references to match the current release.
+
 ## [0.7.2] - 2026-04-20
 
 ### Added
