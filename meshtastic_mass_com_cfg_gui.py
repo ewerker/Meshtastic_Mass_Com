@@ -9,6 +9,8 @@ APP_TITLE = "Meshtastic_Mass_Com Config Generator"
 SCRIPT_DIR = Path(__file__).resolve().parent
 SEND_CFG_NAME = "meshtastic_mass_com.send.cfg"
 LISTEN_CFG_NAME = "meshtastic_mass_com.listen.cfg"
+SEND_HISTORY_NAME = "meshtastic_mass_com.send.history.jsonl"
+LISTEN_HISTORY_NAME = "meshtastic_mass_com.listen.history.jsonl"
 SETTINGS_SECTION = "settings"
 
 
@@ -40,7 +42,7 @@ SEND_FIELDS = [
     FieldSpec("dry_run", "Dry Run", "bool", False, "Preview only, do not transmit. Example: disabled."),
     FieldSpec("unattended", "Unattended", "bool", False, "Skip prompts; all required values must come from CLI or cfg. Example: disabled."),
     FieldSpec("log_file", "Log File", "text", "", "Optional JSONL send log file. Example: ./logs/send_log.jsonl."),
-    FieldSpec("history_file", "History File", "text", "", "Optional JSONL history file used while sending. Example: ./logs/history.jsonl."),
+    FieldSpec("history_file", "History File", "text", SEND_HISTORY_NAME, "JSONL history file used while sending. Example: ./logs/send_history.jsonl."),
 ]
 
 
@@ -53,7 +55,7 @@ LISTEN_FIELDS = [
     FieldSpec("listen_group_only", "Group Only", "bool", False, "Only show group or broadcast traffic while listening. Example: disabled."),
     FieldSpec("listen_text_only", "Text Only", "bool", False, "Only show text packets while listening. Example: enabled."),
     FieldSpec("log_file", "Log File", "text", "", "Optional JSONL listen log file. Example: ./logs/listen_log.jsonl."),
-    FieldSpec("history_file", "History File", "text", "", "Optional JSONL history file used while listening. Example: ./logs/listen_history.jsonl."),
+    FieldSpec("history_file", "History File", "text", LISTEN_HISTORY_NAME, "JSONL history file used while listening. Example: ./logs/listen_history.jsonl."),
     FieldSpec("history_filter", "History Filter", "text", "", "Filter used by history mode. Example: Naunhof."),
     FieldSpec("history_limit", "History Limit", "int", 20, "Number of recent history entries to show. Example: 50."),
 ]
@@ -528,6 +530,22 @@ class MeshtasticConfigGUI:
             output_dir = Path(self.output_dir_var.get()).expanduser()
             family = self._active_family()
             settings = listen_settings if family == "listen" else send_settings
+            target_path = ConfigLogic.config_path(output_dir, family)
+            new_content = ConfigLogic.render_cfg(family, settings, output_dir / "meshtastic_mass_com.py")
+            if target_path.exists():
+                try:
+                    current_content = target_path.read_text(encoding="utf-8")
+                except OSError:
+                    current_content = None
+                if current_content is None or current_content != new_content:
+                    overwrite = messagebox.askyesno(
+                        APP_TITLE,
+                        f"The existing {family} cfg will be overwritten:\n\n{target_path}\n\nContinue?",
+                        icon="warning",
+                    )
+                    if not overwrite:
+                        self.status_var.set(f"Save cancelled for {target_path.name}")
+                        return
             saved_path = ConfigLogic.save_cfg(
                 output_dir,
                 family,

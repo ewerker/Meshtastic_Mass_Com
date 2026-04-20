@@ -393,6 +393,7 @@ def config_keys_for_family(config_family: str) -> tuple[str, ...]:
 def defaults_for_family(config_family: str) -> dict:
     settings = DEFAULT_SETTINGS.copy()
     settings["mode"] = "listen" if config_family == "listen" else "send"
+    settings["history_file"] = history_path_for_family(config_family).name
     return settings
 
 
@@ -400,6 +401,8 @@ def persistable_settings(settings: dict, config_family: str) -> dict:
     persisted = defaults_for_family(config_family)
     for key in config_keys_for_family(config_family):
         persisted[key] = settings.get(key, persisted[key])
+    if not persisted.get("history_file"):
+        persisted["history_file"] = history_path_for_family(config_family).name
     if config_family == "listen":
         persisted["mode"] = "listen"
     elif persisted["mode"] == "listen":
@@ -662,6 +665,28 @@ def save_config(settings: dict, config_path: Path, config_family: str | None = N
         config_file.write(render_config_text(settings, resolved_family))
 
 
+def rendered_config_text(settings: dict, config_path: Path, config_family: str | None = None) -> str:
+    resolved_family = config_family or ("listen" if config_path == LISTEN_CONFIG_PATH else "send")
+    return render_config_text(settings, resolved_family)
+
+
+def config_would_change(settings: dict, config_path: Path, config_family: str | None = None) -> bool:
+    new_text = rendered_config_text(settings, config_path, config_family)
+    if not config_path.exists():
+        return True
+    try:
+        current_text = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return True
+    return current_text != new_text
+
+
+def confirm_cfg_overwrite(config_path: Path) -> bool:
+    print(colorize(f"Warning: existing configuration will be overwritten: {config_path}", "yellow", bold=True))
+    answer = input("Overwrite this cfg file? [y/N]: ").strip().lower()
+    return answer in {"y", "yes"}
+
+
 def collect_cli_overrides(args: argparse.Namespace) -> dict:
     overrides = {}
     for key in (
@@ -729,11 +754,24 @@ def resolve_settings(args: argparse.Namespace) -> dict | None:
         for key in cli_overrides:
             sources[key] = "cmd"
         if should_write_cfg:
-            save_config(settings, config_path, config_family)
-            if config_exists:
-                print(colorize(f"Configuration updated: {config_path}", "green"))
+            cfg_changed = config_would_change(settings, config_path, config_family)
+            should_save = True
+            if config_exists and cfg_changed:
+                if args.unattended or args.forcecfg:
+                    print(colorize(f"Warning: overwriting existing configuration: {config_path}", "yellow"))
+                else:
+                    should_save = confirm_cfg_overwrite(config_path)
+            if should_save:
+                save_config(settings, config_path, config_family)
+                if config_exists:
+                    if cfg_changed:
+                        print(colorize(f"Configuration updated: {config_path}", "green"))
+                    else:
+                        print(colorize(f"Configuration unchanged: {config_path}", "cyan"))
+                else:
+                    print(colorize(f"Configuration created: {config_path}", "green"))
             else:
-                print(colorize(f"Configuration created: {config_path}", "green"))
+                print(colorize("Configuration update cancelled. Using values for this run only.", "yellow"))
         elif args.protectcfg:
             print(colorize("CFG protection is active, configuration changes will not be saved for this run.", "yellow"))
     elif config_exists:
