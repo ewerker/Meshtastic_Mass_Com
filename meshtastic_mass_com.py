@@ -62,6 +62,7 @@ DEFAULT_SETTINGS = {
     "listen_receive_color_template": "timestamp=gray;scope_label=scope_auto;channel_display=magenta;port_label=blue;sender_display=white_bold;target_display=white;payload_display=gray",
     "autoresponder": False,
     "autoresponder_unicast": False,
+    "autoresponder_reply_to_source": True,
     "autoresponder_sender_mode": "all",
     "autoresponder_sender_filter": "",
     "autoresponder_message_mode": "filter",
@@ -107,6 +108,7 @@ SETTING_TYPES = {
     "listen_receive_color_template": "str",
     "autoresponder": "bool",
     "autoresponder_unicast": "bool",
+    "autoresponder_reply_to_source": "bool",
     "autoresponder_sender_mode": "str",
     "autoresponder_sender_filter": "str",
     "autoresponder_message_mode": "str",
@@ -172,6 +174,7 @@ LISTEN_CONFIG_KEYS = (
 AUTORESPONDER_CONFIG_KEYS = (
     "autoresponder",
     "autoresponder_unicast",
+    "autoresponder_reply_to_source",
     "autoresponder_sender_mode",
     "autoresponder_sender_filter",
     "autoresponder_message_mode",
@@ -739,6 +742,7 @@ def config_file_values(settings: dict, config_family: str) -> dict[str, str]:
         "listen_receive_color_template": settings["listen_receive_color_template"] or "",
         "autoresponder": str(settings["autoresponder"]).lower(),
         "autoresponder_unicast": str(settings["autoresponder_unicast"]).lower(),
+        "autoresponder_reply_to_source": str(settings["autoresponder_reply_to_source"]).lower(),
         "autoresponder_sender_mode": settings["autoresponder_sender_mode"] or "all",
         "autoresponder_sender_filter": settings["autoresponder_sender_filter"] or "",
         "autoresponder_message_mode": settings["autoresponder_message_mode"] or "filter",
@@ -915,6 +919,8 @@ def render_config_text(settings: dict, config_family_or_path) -> str:
                 f"autoresponder = {values['autoresponder']}",
                 "# true sends direct replies to the recipients selected by the send cfg instead of only back to the triggering sender.",
                 f"autoresponder_unicast = {values['autoresponder_unicast']}",
+                "# In unicast mode, true still sends the normal reply back to the triggering source first.",
+                f"autoresponder_reply_to_source = {values['autoresponder_reply_to_source']}",
                 "",
                 "# Trigger node matching",
                 "# all = accept every triggering node, filter = only matching triggering nodes.",
@@ -2572,11 +2578,15 @@ def resolve_autoresponder_targets(
 
 
 def should_autorespond_to_group(record: dict, settings: dict) -> bool:
-    if settings.get("autoresponder_unicast"):
-        return False
     if str(record.get("scope") or "") != "group":
         return False
     return record.get("channel_index") in {0, 1}
+
+
+def should_reply_to_source(record: dict, settings: dict) -> bool:
+    if not settings.get("autoresponder_unicast"):
+        return True
+    return bool(settings.get("autoresponder_reply_to_source", True))
 
 
 def send_autoresponse(
@@ -2590,6 +2600,124 @@ def send_autoresponse(
     if not reply_text:
         print(colorize("Autoresponder reply resolved to empty text, nothing will be sent.", "yellow"))
         return
+
+    send_ack = settings.get("autoresponder_send_ack", False)
+    send_delay = settings.get("autoresponder_send_delay", 0.5)
+    send_timeout = settings.get("autoresponder_send_timeout", settings["timeout"])
+    send_retry_implicit_ack = settings.get("autoresponder_send_retry_implicit_ack", 0)
+    send_retry_nak = settings.get("autoresponder_send_retry_nak", 0)
+
+    if should_reply_to_source(record, settings):
+        if should_autorespond_to_group(record, settings):
+            group_channel_index = record.get("channel_index")
+            if group_channel_index is None:
+                group_channel_index = 0
+            group_channel_name = record.get("channel_name") or channel_name(interface, group_channel_index)
+            packet = interface.sendText(
+                reply_text,
+                destinationId="^all",
+                wantAck=False,
+                channelIndex=group_channel_index,
+            )
+            packet_id = getattr(packet, "id", "unknown")
+            channel_text = f"{group_channel_index}:{group_channel_name}" if group_channel_name else str(group_channel_index)
+            print(
+                colorize(
+                    f"Queued broadcast to group on ch={channel_text}: {reply_text} [autoresponder]",
+                    "cyan",
+                )
+            )
+            payload = {
+                "recipient_id": "^all",
+                "recipient_label": group_channel_name or "^all",
+                "channel_index": group_channel_index,
+                "channel_name": group_channel_name,
+                "message": reply_text,
+                "packet_id": packet_id,
+                "result": "queued_to_group",
+                "ki_answer_used": autoresponder_template_uses_ai(settings),
+                "chatbot_model": settings.get("chatbot_model") if autoresponder_template_uses_ai(settings) else "",
+                "source_text": record.get("text"),
+                "source_sender_filter": settings.get("autoresponder_sender_filter", ""),
+                "source_message_filter": settings.get("autoresponder_message_filter", ""),
+                "autoresponder_unicast": settings.get("autoresponder_unicast", False),
+                "target_description": "triggering group channel",
+            }
+            append_jsonl(log_path, "autoresponse", payload)
+            append_history(history_path, "send_autoresponse", payload)
+        else:
+            source_recipient_id = record.get("from_id")
+            if source_recipient_id:
+                source_channel_index = record.get("channel_index")
+                if source_channel_index is None:
+                    source_channel_index = 0
+                source_channel_name = record.get("channel_name") or channel_name(interface, source_channel_index)
+                source_channel_text = f"{source_channel_index}:{source_channel_name}" if source_channel_name else str(source_channel_index)
+                source_recipient_label = record.get("from_label") or source_recipient_id
+                result = "sent_without_ack"
+                packet_id = "unknown"
+                if send_ack:
+                    ack_kind, ack_message, packet_id, _attempts_used = send_with_ack_retry(
+                        interface,
+                        {
+                            "node_id": source_recipient_id,
+                            "label": source_recipient_label,
+                        },
+                        reply_text,
+                        {
+                            "channel_index": source_channel_index,
+                            "timeout": send_timeout,
+                            "retry_implicit_ack": send_retry_implicit_ack,
+                            "retry_nak": send_retry_nak,
+                            "delay": send_delay,
+                        },
+                        log_path,
+                    )
+                    result = ack_kind
+                    color = "green" if ack_kind == "ack" else "yellow" if ack_kind == "implicit_ack" else "red"
+                    print(
+                        colorize(
+                            f"Sent to {source_recipient_label} ({source_recipient_id}) on ch={source_channel_text}: {reply_text} [autoresponder]",
+                            "cyan",
+                        )
+                    )
+                    print(colorize(f"{ack_message} {source_recipient_label} ({source_recipient_id}), packet ID {packet_id} [autoresponder]", color))
+                else:
+                    packet = interface.sendText(
+                        reply_text,
+                        destinationId=source_recipient_id,
+                        wantAck=False,
+                        channelIndex=source_channel_index,
+                    )
+                    packet_id = getattr(packet, "id", "unknown")
+                    print(
+                        colorize(
+                            f"Sent to {source_recipient_label} ({source_recipient_id}) on ch={source_channel_text}: {reply_text} [autoresponder], packet ID {packet_id}",
+                            "cyan",
+                        )
+                    )
+                payload = {
+                    "recipient_id": source_recipient_id,
+                    "recipient_label": source_recipient_label,
+                    "channel_index": source_channel_index,
+                    "channel_name": source_channel_name,
+                    "message": reply_text,
+                    "packet_id": packet_id,
+                    "result": result,
+                    "ki_answer_used": autoresponder_template_uses_ai(settings),
+                    "chatbot_model": settings.get("chatbot_model") if autoresponder_template_uses_ai(settings) else "",
+                    "source_text": record.get("text"),
+                    "source_sender_filter": settings.get("autoresponder_sender_filter", ""),
+                    "source_message_filter": settings.get("autoresponder_message_filter", ""),
+                    "autoresponder_unicast": settings.get("autoresponder_unicast", False),
+                    "target_description": "triggering sender",
+                }
+                append_jsonl(log_path, "autoresponse", payload)
+                append_history(history_path, "send_autoresponse", payload)
+
+    if not settings.get("autoresponder_unicast"):
+        return
+
     try:
         targets, channel_index, resolved_channel_name, target_description = resolve_autoresponder_targets(
             interface, record, settings
@@ -2598,58 +2726,12 @@ def send_autoresponse(
         print(colorize(f"Autoresponder target selection failed: {exc}", "red", bold=True))
         return
 
-    if should_autorespond_to_group(record, settings):
-        group_channel_index = record.get("channel_index")
-        if group_channel_index is None:
-            group_channel_index = 0
-        group_channel_name = record.get("channel_name") or channel_name(interface, group_channel_index)
-        packet = interface.sendText(
-            reply_text,
-            destinationId="^all",
-            wantAck=False,
-            channelIndex=group_channel_index,
-        )
-        packet_id = getattr(packet, "id", "unknown")
-        channel_text = f"{group_channel_index}:{group_channel_name}" if group_channel_name else str(group_channel_index)
-        print(
-            colorize(
-                f"Queued broadcast to group on ch={channel_text}: {reply_text} [autoresponder]",
-                "cyan",
-            )
-        )
-        payload = {
-            "recipient_id": "^all",
-            "recipient_label": group_channel_name or "^all",
-            "channel_index": group_channel_index,
-            "channel_name": group_channel_name,
-            "message": reply_text,
-            "packet_id": packet_id,
-            "result": "queued_to_group",
-            "ki_answer_used": autoresponder_template_uses_ai(settings),
-            "chatbot_model": settings.get("chatbot_model") if autoresponder_template_uses_ai(settings) else "",
-            "source_text": record.get("text"),
-            "source_sender_filter": settings.get("autoresponder_sender_filter", ""),
-            "source_message_filter": settings.get("autoresponder_message_filter", ""),
-            "autoresponder_unicast": settings.get("autoresponder_unicast", False),
-            "target_description": "triggering group channel",
-        }
-        append_jsonl(log_path, "autoresponse", payload)
-        append_history(history_path, "send_autoresponse", payload)
-        return
-
     if not targets:
         print(colorize("Autoresponder found no matching recipients for the current send target selection.", "yellow"))
         return
 
     channel_text = f"{channel_index}:{resolved_channel_name}" if resolved_channel_name else str(channel_index)
-    if settings.get("autoresponder_unicast"):
-        print(colorize(f"Autoresponder unicast target set: {target_description}", "cyan"))
-
-    send_ack = settings.get("autoresponder_send_ack", False)
-    send_delay = settings.get("autoresponder_send_delay", 0.5)
-    send_timeout = settings.get("autoresponder_send_timeout", settings["timeout"])
-    send_retry_implicit_ack = settings.get("autoresponder_send_retry_implicit_ack", 0)
-    send_retry_nak = settings.get("autoresponder_send_retry_nak", 0)
+    print(colorize(f"Autoresponder unicast target set: {target_description}", "cyan"))
 
     for recipient in targets:
         recipient_id = recipient.get("node_id")
@@ -2746,6 +2828,7 @@ def run_listen_mode(interface: SerialInterface, settings: dict) -> int:
             ("listen_receive_color_template", settings["listen_receive_color_template"]),
             ("autoresponder", settings["autoresponder"]),
             ("autoresponder_unicast", settings["autoresponder_unicast"]),
+            ("autoresponder_reply_to_source", settings["autoresponder_reply_to_source"]),
             ("autoresponder_sender_mode", "trigger_node_mode", settings["autoresponder_sender_mode"]),
             ("autoresponder_sender_filter", "trigger_node_filter", settings["autoresponder_sender_filter"]),
             ("autoresponder_message_mode", "trigger_message_mode", settings["autoresponder_message_mode"]),

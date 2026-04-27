@@ -84,6 +84,7 @@ LISTEN_FIELDS = [
 AUTORESPONDER_FIELDS = [
     FieldSpec("autoresponder", "Enabled", "bool", False, "Enable the autoresponder by default for listen mode. Example: enabled."),
     FieldSpec("autoresponder_unicast", "Unicast Mode", "bool", False, "Send direct replies to the recipients selected by the send cfg instead of only back to the triggering sender. Example: enabled."),
+    FieldSpec("autoresponder_reply_to_source", "Reply To Source", "bool", True, "In unicast mode, also send the normal reply back to the triggering source first. Example: enabled."),
     FieldSpec("autoresponder_sender_mode", "Trigger Node Mode", "choice", "all", "Which nodes may trigger replies. Example: filter.", ("all", "filter")),
     FieldSpec("autoresponder_sender_filter", "Trigger Node Filter", "text", "JR*", "Trigger node filter for node ID, short name, or long name. Example: JR or JR*."),
     FieldSpec("autoresponder_message_mode", "Trigger Message Mode", "choice", "filter", "Which messages may trigger replies. Example: filter.", ("all", "filter")),
