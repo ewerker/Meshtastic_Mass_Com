@@ -1,13 +1,13 @@
 # Meshtastic_Mass_Com
 
-Aktuelle Version: `0.7.6`
+Aktuelle Version: `0.7.7`
 
 Deutsche Dokumentation. English version: [README.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\README.md)
 Release Notes: [CHANGELOG.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\CHANGELOG.md)
 
 Copyright (c) 2026 Frank Richter, [w-2.de](https://w-2.de)
 
-Kleines Python-Werkzeug fuer umfassende Meshtastic-Kommunikation: Direktnachrichten, Gruppen-Broadcasts, Live-Mitschnitt, Logging, History und getrennte lokale Konfigurationsdateien fuer Senden und Lauschen.
+Kleines Python-Werkzeug fuer umfassende Meshtastic-Kommunikation: Direktnachrichten, Gruppen-Broadcasts, Live-Mitschnitt, Logging, History, KI-gestuetztes Autoresponder-Verhalten und getrennte lokale Konfigurationsdateien fuer Senden, Lauschen, Autoresponder und Chatbot.
 
 ## Weiteres Projekt
 
@@ -45,6 +45,7 @@ Weniger wichtig ist es eher dann, wenn du nur:
 - Einen Live-Listener mit Kanal-, Absender-, Scope- und Textfiltern betreiben
 - Eine lokale JSONL-Aktivitaetsdatei plus eine getrennte History/Inbox pflegen
 - CFG-gesteuerte Autoresponder-Regeln fuer bestimmte Absender oder Triggertexte verwenden
+- Optional eine OpenAI-gestuetzte Chat-Antwort mit wiederverwendbarem Node-Kontext einsetzen
 - Geaenderte CFG-Dateien im Listenbetrieb nachladen, ohne den ganzen Ablauf neu zu starten
 
 ## Funktionen
@@ -61,7 +62,10 @@ Weniger wichtig ist es eher dann, wenn du nur:
 - Kann echte Gruppen-/Broadcast-Nachrichten auf einem gewaehlten Kanal senden
 - Kann einen Dry-Run ohne Aussendung ausfuehren
 - Kann eine lokale History/Inbox pflegen und spaeter anzeigen
-- Speichert Laufzeitwerte in getrennten `.cfg`-Dateien fuer Senden und Lauschen
+- Kann `%KI_Answer%` in Autoresponder-Templates nutzen, um eine schnelle OpenAI-Antwort einzubauen
+- Speichert pro anfragender Node einen JSON-Gespraechsverlauf fuer Folgefragen
+- Kann Gruppennachrichten auf Kanal `0` und `1` in denselben eingehenden Gruppenkanal beantworten
+- Speichert Laufzeitwerte in getrennten `.cfg`-Dateien fuer Senden, Lauschen, Autoresponder und Chatbot
 - Unterstuetzt unbeaufsichtigte Laeufe ohne Rueckfragen
 - Kann die Konfigurationsdatei gezielt schuetzen oder bewusst aktualisieren
 
@@ -88,9 +92,36 @@ MIT-Lizenz. Siehe [LICENSE](C:\Users\richt\Documents\Codex\Meshtastic_tool\LICEN
 - Skript: [meshtastic_mass_com.py](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.py)
 - Sende-Konfiguration: [meshtastic_mass_com.send.cfg](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.send.cfg)
 - Listen-Konfiguration: [meshtastic_mass_com.listen.cfg](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.listen.cfg)
+- Autoresponder-Konfiguration: [meshtastic_mass_com.autoresponder.cfg](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.autoresponder.cfg)
+- Chatbot-Konfiguration: [meshtastic_mass_com.chatbot.cfg](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.chatbot.cfg)
 - Standard-History fuer Senden: [meshtastic_mass_com.send.history.jsonl](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.send.history.jsonl)
 - Standard-History fuer Lauschen: [meshtastic_mass_com.listen.history.jsonl](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.listen.history.jsonl)
+- Standard-Verzeichnis fuer Chat-Verlaeufe: `meshtastic_mass_com.chatbot_history/`
 - Englische Dokumentation: [README.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\README.md)
+
+## KI-Autoresponder
+
+Der Autoresponder kann optional OpenAI fuer eine Antwort verwenden, wenn im Reply-Template `%KI_Answer%` oder `%KI_answer%` vorkommt.
+
+So funktioniert es:
+
+- Der eingehende Funktext wird zusammen mit dem konfigurierten Systemprompt an das OpenAI-Modell gesendet.
+- Pro anfragender Node wird eine eigene lokale JSON-Datei mit dem Gespraechsverlauf gefuehrt.
+- Folgefragen derselben Node verwenden diesen Kontext automatisch weiter.
+- Pro Node bleiben nur die neuesten 9 Assistant-Antworten erhalten, damit der Verlauf kompakt bleibt.
+- Die finale Meshtastic-Antwort wird automatisch auf die Geraete-Payload-Laenge gekuerzt.
+
+Beteiligte Dateien:
+
+- Autoresponder-Regeln: [meshtastic_mass_com.autoresponder.cfg](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.autoresponder.cfg)
+- OpenAI-/Chatbot-Einstellungen: [meshtastic_mass_com.chatbot.cfg](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.chatbot.cfg)
+- Pro-Node-Gespraechsspeicher: `meshtastic_mass_com.chatbot_history/<node>.json`
+
+Beispiel-Template:
+
+```ini
+autoresponder_reply_template = Autoresponder triggered by %shortname%: %message% / Answer: %KI_Answer%
+```
 
 ## Erster Start
 

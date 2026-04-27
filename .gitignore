@@ -4,4 +4,7 @@ python-3.14.4-amd64.exe
 *.send.cfg
 *.listen.cfg
 *.autoresponder.cfg
+*.chatbot.cfg
 *.history.jsonl
+*.log.jsonl
+*.chatbot_history/

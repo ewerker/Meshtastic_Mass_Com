@@ -8,6 +8,22 @@ The format is inspired by Keep a Changelog and uses project release tags where a
 
 - Reserved for upcoming changes before the next tagged release.
 
+## [0.7.7] - 2026-04-27
+
+### Added
+
+- Added a dedicated chatbot cfg workflow for the autoresponder, including a fourth GUI tab for OpenAI model, prompt, timeout, and API key environment settings.
+- Added `%KI_Answer%` / `%KI_answer%` template variables so autoresponder replies can include a model-generated answer from the incoming radio message.
+- Added per-node chatbot conversation history stored as JSON flat files and reused automatically for follow-up questions.
+
+### Changed
+
+- Trimmed chatbot history automatically so only the newest 9 assistant replies are kept per requesting node.
+- Enforced Meshtastic payload-safe autoresponder output length by truncating final replies to the device text payload limit.
+- Extended group autoresponder replies so incoming group traffic on channels `0` and `1` is answered back into the same group channel.
+- Made group autoresponder logging more honest by marking group replies as queued broadcasts instead of confirmed sends.
+- Improved the GUI chatbot prompt field to a multiline editor and renamed listen-tab filter labels to clearer `Node Filter` / `Channel Filter`.
+
 ## [0.7.6] - 2026-04-23
 
 ### Changed

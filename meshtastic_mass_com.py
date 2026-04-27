@@ -12,10 +12,13 @@ import os
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 from meshtastic.serial_interface import SerialInterface
+from meshtastic.protobuf import mesh_pb2
 from pubsub import pub
 from serial.tools import list_ports
 from meshtastic_mass_com_version import APP_NAME, APP_VERSION
@@ -25,9 +28,13 @@ SCRIPT_STEM = SCRIPT_PATH.stem
 SEND_CONFIG_PATH = SCRIPT_PATH.with_name(f"{SCRIPT_STEM}.send.cfg")
 LISTEN_CONFIG_PATH = SCRIPT_PATH.with_name(f"{SCRIPT_STEM}.listen.cfg")
 AUTORESPONDER_CONFIG_PATH = SCRIPT_PATH.with_name(f"{SCRIPT_STEM}.autoresponder.cfg")
+CHATBOT_CONFIG_PATH = SCRIPT_PATH.with_name(f"{SCRIPT_STEM}.chatbot.cfg")
 SEND_HISTORY_PATH = SCRIPT_PATH.with_name(f"{SCRIPT_STEM}.send.history.jsonl")
 LISTEN_HISTORY_PATH = SCRIPT_PATH.with_name(f"{SCRIPT_STEM}.listen.history.jsonl")
+CHATBOT_HISTORY_DIR = SCRIPT_PATH.parent / f"{SCRIPT_STEM}.chatbot_history"
 CONFIG_SECTION = "settings"
+MAX_CHATBOT_ASSISTANT_TURNS = 9
+MAX_MESHTASTIC_TEXT_BYTES = int(mesh_pb2.Constants.DATA_PAYLOAD_LEN)
 DEFAULT_SETTINGS = {
     "mode": "send",
     "port": "",
@@ -51,6 +58,8 @@ DEFAULT_SETTINGS = {
     "listen_group_only": False,
     "listen_text_only": False,
     "listen_verbose": False,
+    "listen_receive_template": "[%timestamp%] %scope_label% %channel_display% %port_label% %sender_display% -> %target_display%%payload_display%",
+    "listen_receive_color_template": "timestamp=gray;scope_label=scope_auto;channel_display=magenta;port_label=blue;sender_display=white_bold;target_display=white;payload_display=gray",
     "autoresponder": False,
     "autoresponder_unicast": False,
     "autoresponder_sender_mode": "all",
@@ -59,6 +68,11 @@ DEFAULT_SETTINGS = {
     "autoresponder_message_filter": "!Ping",
     "autoresponder_reply": "Pong",
     "autoresponder_reply_template": "Autoresponder triggered by  %shortname%: %message% / Answer:  %answer%",
+    "chatbot_model": "gpt-4.1-mini",
+    "chatbot_system_prompt": "Du bist ein hilfreicher Antwortbot, der Fragen beantwortet die per Funk gestellt werden.",
+    "chatbot_max_output_tokens": 160,
+    "chatbot_timeout": 20,
+    "chatbot_api_key_env": "OPENAI_API_KEY",
     "retry_implicit_ack": 0,
     "retry_nak": 0,
     "dry_run": False,
@@ -89,6 +103,8 @@ SETTING_TYPES = {
     "listen_group_only": "bool",
     "listen_text_only": "bool",
     "listen_verbose": "bool",
+    "listen_receive_template": "str",
+    "listen_receive_color_template": "str",
     "autoresponder": "bool",
     "autoresponder_unicast": "bool",
     "autoresponder_sender_mode": "str",
@@ -97,6 +113,11 @@ SETTING_TYPES = {
     "autoresponder_message_filter": "str",
     "autoresponder_reply": "str",
     "autoresponder_reply_template": "str",
+    "chatbot_model": "str",
+    "chatbot_system_prompt": "str",
+    "chatbot_max_output_tokens": "int",
+    "chatbot_timeout": "int",
+    "chatbot_api_key_env": "str",
     "retry_implicit_ack": "int",
     "retry_nak": "int",
     "dry_run": "bool",
@@ -138,6 +159,8 @@ LISTEN_CONFIG_KEYS = (
     "listen_group_only",
     "listen_text_only",
     "listen_verbose",
+    "listen_receive_template",
+    "listen_receive_color_template",
     "unattended",
     "log_file",
     "log_rotate_max_mb",
@@ -155,6 +178,13 @@ AUTORESPONDER_CONFIG_KEYS = (
     "autoresponder_message_filter",
     "autoresponder_reply",
     "autoresponder_reply_template",
+)
+CHATBOT_CONFIG_KEYS = (
+    "chatbot_model",
+    "chatbot_system_prompt",
+    "chatbot_max_output_tokens",
+    "chatbot_timeout",
+    "chatbot_api_key_env",
 )
 AUTORESPONDER_SEND_KEYS = (
     "ack",
@@ -187,6 +217,8 @@ LISTEN_HOT_RELOAD_KEYS = (
     "listen_group_only",
     "listen_text_only",
     "listen_verbose",
+    "listen_receive_template",
+    "listen_receive_color_template",
     "unattended",
     "log_file",
     "log_rotate_max_mb",
@@ -195,6 +227,7 @@ LISTEN_HOT_RELOAD_KEYS = (
     "history_filter",
     "history_limit",
 )
+CHATBOT_HOT_RELOAD_KEYS = CHATBOT_CONFIG_KEYS
 LISTEN_RESTART_REQUIRED_KEYS = (
     "port",
     "timeout",
@@ -248,6 +281,7 @@ ANSI_COLORS = {
     "magenta": "\033[35m",
     "cyan": "\033[36m",
     "white": "\033[37m",
+    "gray": "\033[90m",
 }
 LOG_ROTATION_POLICY: dict[str, tuple[int, int]] = {}
 
@@ -513,6 +547,10 @@ def example_command_for_family(config_family: str) -> str:
         return (
             'python ./meshtastic_mass_com.py --listen --autoresponder'
         )
+    if config_family == "chatbot":
+        return (
+            'python ./meshtastic_mass_com.py --listen'
+        )
     return (
         'python ./meshtastic_mass_com.py --mode send --port <PORT> --channel-index 1 --ack '
         '--delay 1.5 --timeout 60 --target-mode select --filter "FR*" --selection "1,3" '
@@ -532,6 +570,8 @@ def config_path_for_family(config_family: str) -> Path:
         return LISTEN_CONFIG_PATH
     if config_family == "autoresponder":
         return AUTORESPONDER_CONFIG_PATH
+    if config_family == "chatbot":
+        return CHATBOT_CONFIG_PATH
     return SEND_CONFIG_PATH
 
 
@@ -544,6 +584,8 @@ def config_keys_for_family(config_family: str) -> tuple[str, ...]:
         return LISTEN_CONFIG_KEYS
     if config_family == "autoresponder":
         return AUTORESPONDER_CONFIG_KEYS
+    if config_family == "chatbot":
+        return CHATBOT_CONFIG_KEYS
     return SEND_CONFIG_KEYS
 
 
@@ -591,7 +633,13 @@ def parse_config_value(section: configparser.SectionProxy, key: str, value_type:
 
 def load_config_with_sources(config_path: Path, config_family: str | None = None) -> tuple[dict, dict]:
     resolved_family = config_family or (
-        "listen" if config_path == LISTEN_CONFIG_PATH else "autoresponder" if config_path == AUTORESPONDER_CONFIG_PATH else "send"
+        "listen"
+        if config_path == LISTEN_CONFIG_PATH
+        else "autoresponder"
+        if config_path == AUTORESPONDER_CONFIG_PATH
+        else "chatbot"
+        if config_path == CHATBOT_CONFIG_PATH
+        else "send"
     )
     settings = defaults_for_family(resolved_family)
     sources = {key: "default" for key in DEFAULT_SETTINGS}
@@ -619,6 +667,7 @@ def format_source_label(source: str) -> str:
         "send_cfg": "green",
         "listen_cfg": "green",
         "autoresponder_cfg": "green",
+        "chatbot_cfg": "green",
         "default": "yellow",
         "auto": "magenta",
         "prompt": "blue",
@@ -645,6 +694,9 @@ def print_effective_parameters(settings: dict, mode_label: str, fields: list[tup
     autoresponder_config_path = settings.get("__autoresponder_config_path")
     if autoresponder_config_path:
         print(f"  autoresponder cfg file: {autoresponder_config_path}")
+    chatbot_config_path = settings.get("__chatbot_config_path")
+    if chatbot_config_path:
+        print(f"  chatbot cfg file: {chatbot_config_path}")
     send_config_path = settings.get("__send_config_path")
     if send_config_path:
         print(f"  send cfg file: {send_config_path}")
@@ -683,6 +735,8 @@ def config_file_values(settings: dict, config_family: str) -> dict[str, str]:
         "listen_group_only": str(settings["listen_group_only"]).lower(),
         "listen_text_only": str(settings["listen_text_only"]).lower(),
         "listen_verbose": str(settings["listen_verbose"]).lower(),
+        "listen_receive_template": settings["listen_receive_template"] or "",
+        "listen_receive_color_template": settings["listen_receive_color_template"] or "",
         "autoresponder": str(settings["autoresponder"]).lower(),
         "autoresponder_unicast": str(settings["autoresponder_unicast"]).lower(),
         "autoresponder_sender_mode": settings["autoresponder_sender_mode"] or "all",
@@ -691,6 +745,11 @@ def config_file_values(settings: dict, config_family: str) -> dict[str, str]:
         "autoresponder_message_filter": settings["autoresponder_message_filter"] or "",
         "autoresponder_reply": settings["autoresponder_reply"] or "",
         "autoresponder_reply_template": settings["autoresponder_reply_template"] or "",
+        "chatbot_model": settings["chatbot_model"] or "",
+        "chatbot_system_prompt": settings["chatbot_system_prompt"] or "",
+        "chatbot_max_output_tokens": str(settings["chatbot_max_output_tokens"]),
+        "chatbot_timeout": str(settings["chatbot_timeout"]),
+        "chatbot_api_key_env": settings["chatbot_api_key_env"] or "",
         "retry_implicit_ack": str(settings["retry_implicit_ack"]),
         "retry_nak": str(settings["retry_nak"]),
         "dry_run": str(settings["dry_run"]).lower(),
@@ -706,13 +765,31 @@ def render_config_text(settings: dict, config_family_or_path) -> str:
             config_family = "listen"
         elif config_family_or_path == AUTORESPONDER_CONFIG_PATH:
             config_family = "autoresponder"
+        elif config_family_or_path == CHATBOT_CONFIG_PATH:
+            config_family = "chatbot"
         else:
             config_family = "send"
     else:
         config_family = str(config_family_or_path)
     values = config_file_values(settings, config_family)
-    active_modes = "listen" if config_family == "listen" else "autoresponder" if config_family == "autoresponder" else "send, broadcast, history"
-    family_title = "Listen workflow" if config_family == "listen" else "Autoresponder" if config_family == "autoresponder" else "Send workflow"
+    active_modes = (
+        "listen"
+        if config_family == "listen"
+        else "autoresponder"
+        if config_family == "autoresponder"
+        else "chatbot"
+        if config_family == "chatbot"
+        else "send, broadcast, history"
+    )
+    family_title = (
+        "Listen workflow"
+        if config_family == "listen"
+        else "Autoresponder"
+        if config_family == "autoresponder"
+        else "Chatbot"
+        if config_family == "chatbot"
+        else "Send workflow"
+    )
     example = example_command_for_family(config_family)
 
     lines = [
@@ -736,6 +813,7 @@ def render_config_text(settings: dict, config_family_or_path) -> str:
         "# --target-mode / --filter / --selection control send-mode recipients.",
         "# --ack / --retry-implicit-ack / --retry-nak control delivery handling.",
         "# --listen-filter / --listen-channel-index / --dm-only / --group-only / --text-only / --verbose-listen control listen-mode filtering and output.",
+        "# --listen-receive-template and --listen-receive-color-template are cfg-driven only and customize receive line rendering.",
         "# --log-file plus log rotation settings control JSONL log growth.",
         "# --log-file / --history-file / --history-filter / --history-limit control local files and history output.",
         "# --forcecfg / --protectcfg / --clear control cfg handling.",
@@ -755,6 +833,13 @@ def render_config_text(settings: dict, config_family_or_path) -> str:
             [
                 "# - This cfg controls autoresponder behavior for listen mode.",
                 "# - The CLI only toggles autoresponder on or off; matching rules and reply text come from this cfg.",
+            ]
+        )
+    elif config_family == "chatbot":
+        lines.extend(
+            [
+                "# - This cfg is used only when the autoresponder reply template contains %KI_Answer%.",
+                "# - It controls which OpenAI model is used and which system prompt is sent with the incoming radio message.",
             ]
         )
     else:
@@ -794,6 +879,13 @@ def render_config_text(settings: dict, config_family_or_path) -> str:
                 f"listen_text_only = {values['listen_text_only']}",
                 "# true also prints the full received record as JSON, similar to the receive log.",
                 f"listen_verbose = {values['listen_verbose']}",
+                "# Template for the receive line. Supports the autoresponder variables plus receive-display variables.",
+                "# Extra receive variables: %timestamp%, %scope_label%, %channel_display%, %port_label%, %sender_display%, %target_display%, %payload_display%",
+                "# Extra packet variables: %to_id%, %packet_id%, %raw_channel%, %portnum%, %rxsnr%, %rxrssi%, %hopstart%, %hoplimit%, %hopsused%, %wantack%, %priority%, %packet_json%, %decoded_json%",
+                f"listen_receive_template = {values['listen_receive_template']}",
+                "# Color map for receive placeholders. Format: placeholder=color;placeholder=color",
+                "# Supported colors: red, green, yellow, blue, magenta, cyan, white, gray plus *_bold variants and scope_auto.",
+                f"listen_receive_color_template = {values['listen_receive_color_template']}",
                 "",
                 "# Runtime",
                 "# true skips interactive prompts such as serial port selection.",
@@ -824,26 +916,47 @@ def render_config_text(settings: dict, config_family_or_path) -> str:
                 "# true sends direct replies to the recipients selected by the send cfg instead of only back to the triggering sender.",
                 f"autoresponder_unicast = {values['autoresponder_unicast']}",
                 "",
-                "# Sender matching",
-                "# all = accept every sender, filter = only matching senders.",
+                "# Trigger node matching",
+                "# all = accept every triggering node, filter = only matching triggering nodes.",
                 f"autoresponder_sender_mode = {values['autoresponder_sender_mode']}",
-                "# Sender filter for node ID, short name, or long name. Wildcards such as JR* are supported.",
+                "# Trigger node filter for node ID, short name, or long name. Wildcards such as JR* are supported.",
                 f"autoresponder_sender_filter = {values['autoresponder_sender_filter']}",
                 "",
-                "# Message matching",
-                "# all = answer every matching sender, filter = only when the message text matches.",
+                "# Trigger message matching",
+                "# all = answer every matching trigger node, filter = only when the message text matches.",
                 f"autoresponder_message_mode = {values['autoresponder_message_mode']}",
-                "# Message text filter. Wildcards such as !Ping* are supported; without wildcards it behaves like a contains match.",
+                "# Trigger message text filter. Wildcards such as !Ping* are supported; without wildcards it behaves like a contains match.",
                 f"autoresponder_message_filter = {values['autoresponder_message_filter']}",
                 "",
                 "# Reply",
                 "# Direct message text sent back to the original sender.",
                 f"autoresponder_reply = {values['autoresponder_reply']}",
                 "# Optional reply template with variables from the triggering message.",
-                "# Available variables: %node_id%, %label%, %shortname%, %longname%, %message%, %channel_index%, %channel_name%, %scope%, %answer%",
+                "# Available variables: %node_id%, %label%, %shortname%, %longname%, %to_id%, %packet_id%, %message%, %channel_index%, %channel_name%, %raw_channel%, %scope%, %portnum%, %rxsnr%, %rxrssi%, %hopstart%, %hoplimit%, %hopsused%, %wantack%, %priority%, %packet_json%, %decoded_json%, %answer%, %KI_Answer%, %KI_answer%",
                 "# %answer% is replaced with the configured autoresponder_reply text.",
+                "# %KI_Answer% and %KI_answer% trigger an OpenAI request using the chatbot cfg and are replaced by the model answer.",
                 "# Example: Autoresponder triggered by  %shortname%: %message% / Answer:  %answer%",
                 f"autoresponder_reply_template = {values['autoresponder_reply_template']}",
+                "",
+            ]
+        )
+    elif config_family == "chatbot":
+        lines.extend(
+            [
+                "# Chatbot model",
+                "# Fast OpenAI model used when %KI_Answer% appears in autoresponder_reply_template.",
+                f"chatbot_model = {values['chatbot_model']}",
+                "# System prompt sent with the incoming radio message.",
+                f"chatbot_system_prompt = {values['chatbot_system_prompt']}",
+                "# Maximum output tokens for the model answer. Keep this compact for radio use.",
+                f"chatbot_max_output_tokens = {values['chatbot_max_output_tokens']}",
+                "# HTTP timeout in seconds for the OpenAI API request.",
+                f"chatbot_timeout = {values['chatbot_timeout']}",
+                "# Environment variable that contains the OpenAI API key.",
+                f"chatbot_api_key_env = {values['chatbot_api_key_env']}",
+                f"# Conversation history is stored as one JSON flat file per requesting node in: {CHATBOT_HISTORY_DIR.name}",
+                f"# The oldest turns are dropped after {MAX_CHATBOT_ASSISTANT_TURNS} assistant replies.",
+                f"# Final autoresponder messages are truncated to the Meshtastic payload limit of {MAX_MESHTASTIC_TEXT_BYTES} bytes.",
                 "",
             ]
         )
@@ -911,7 +1024,15 @@ def render_config_text(settings: dict, config_family_or_path) -> str:
 
 
 def save_config(settings: dict, config_path: Path, config_family: str | None = None) -> None:
-    resolved_family = config_family or ("listen" if config_path == LISTEN_CONFIG_PATH else "autoresponder" if config_path == AUTORESPONDER_CONFIG_PATH else "send")
+    resolved_family = config_family or (
+        "listen"
+        if config_path == LISTEN_CONFIG_PATH
+        else "autoresponder"
+        if config_path == AUTORESPONDER_CONFIG_PATH
+        else "chatbot"
+        if config_path == CHATBOT_CONFIG_PATH
+        else "send"
+    )
     with config_path.open("w", encoding="utf-8") as config_file:
         config_file.write(render_config_text(settings, resolved_family))
 
@@ -926,7 +1047,7 @@ def create_default_config(config_family: str) -> Path:
 def ensure_missing_configs(args: argparse.Namespace) -> None:
     no_cli_args = len(sys.argv) == 1
     if no_cli_args:
-        for config_family in ("send", "listen", "autoresponder"):
+        for config_family in ("send", "listen", "autoresponder", "chatbot"):
             config_path = config_path_for_family(config_family)
             if not config_path.exists():
                 create_default_config(config_family)
@@ -939,10 +1060,20 @@ def ensure_missing_configs(args: argparse.Namespace) -> None:
 
     if config_family == "listen" and not AUTORESPONDER_CONFIG_PATH.exists():
         create_default_config("autoresponder")
+    if config_family == "listen" and not CHATBOT_CONFIG_PATH.exists():
+        create_default_config("chatbot")
 
 
 def rendered_config_text(settings: dict, config_path: Path, config_family: str | None = None) -> str:
-    resolved_family = config_family or ("listen" if config_path == LISTEN_CONFIG_PATH else "autoresponder" if config_path == AUTORESPONDER_CONFIG_PATH else "send")
+    resolved_family = config_family or (
+        "listen"
+        if config_path == LISTEN_CONFIG_PATH
+        else "autoresponder"
+        if config_path == AUTORESPONDER_CONFIG_PATH
+        else "chatbot"
+        if config_path == CHATBOT_CONFIG_PATH
+        else "send"
+    )
     return render_config_text(settings, resolved_family)
 
 
@@ -1036,6 +1167,10 @@ def resolve_settings(args: argparse.Namespace) -> dict | None:
         for key in AUTORESPONDER_CONFIG_KEYS:
             settings[key] = autoresponder_settings[key]
             sources[key] = autoresponder_sources[key]
+        chatbot_settings, chatbot_sources = load_config_with_sources(CHATBOT_CONFIG_PATH, "chatbot")
+        for key in CHATBOT_CONFIG_KEYS:
+            settings[key] = chatbot_settings[key]
+            sources[key] = chatbot_sources[key]
         send_settings, send_sources = load_config_with_sources(SEND_CONFIG_PATH, "send")
         for key in AUTORESPONDER_SEND_KEYS:
             mapped_key = AUTORESPONDER_SEND_KEY_MAP[key]
@@ -1075,6 +1210,7 @@ def resolve_settings(args: argparse.Namespace) -> dict | None:
     settings["__config_family"] = config_family
     if config_family == "listen":
         settings["__autoresponder_config_path"] = AUTORESPONDER_CONFIG_PATH
+        settings["__chatbot_config_path"] = CHATBOT_CONFIG_PATH
         settings["__send_config_path"] = SEND_CONFIG_PATH
     return settings
 
@@ -1580,6 +1716,106 @@ def sanitize_for_json(value):
     return value
 
 
+def safe_node_filename(node_id: str | None) -> str:
+    node_text = str(node_id or "unknown")
+    sanitized = "".join(char if char.isalnum() or char in ("-", "_") else "_" for char in node_text)
+    return sanitized or "unknown"
+
+
+def chatbot_history_path_for_node(node_id: str | None) -> Path:
+    return CHATBOT_HISTORY_DIR / f"{safe_node_filename(node_id)}.json"
+
+
+def load_chatbot_history(node_id: str | None) -> dict:
+    path = chatbot_history_path_for_node(node_id)
+    if not path.exists():
+        return {
+            "node_id": str(node_id or ""),
+            "updated_at": now_string(),
+            "messages": [],
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {
+            "node_id": str(node_id or ""),
+            "updated_at": now_string(),
+            "messages": [],
+        }
+    messages = payload.get("messages", [])
+    if not isinstance(messages, list):
+        messages = []
+    return {
+        "node_id": str(payload.get("node_id") or node_id or ""),
+        "updated_at": str(payload.get("updated_at") or now_string()),
+        "messages": [message for message in messages if isinstance(message, dict)],
+    }
+
+
+def count_assistant_messages(messages: list[dict]) -> int:
+    return sum(1 for message in messages if str(message.get("role")) == "assistant")
+
+
+def trim_chatbot_history(messages: list[dict], max_assistant_turns: int = MAX_CHATBOT_ASSISTANT_TURNS) -> list[dict]:
+    trimmed = list(messages)
+    while count_assistant_messages(trimmed) > max_assistant_turns and trimmed:
+        removed_assistant = False
+        while trimmed:
+            removed = trimmed.pop(0)
+            if str(removed.get("role")) == "assistant":
+                removed_assistant = True
+                break
+        if not removed_assistant:
+            break
+    return trimmed
+
+
+def save_chatbot_history(node_id: str | None, messages: list[dict]) -> Path:
+    CHATBOT_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    path = chatbot_history_path_for_node(node_id)
+    payload = {
+        "node_id": str(node_id or ""),
+        "updated_at": now_string(),
+        "messages": trim_chatbot_history(messages),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+    return path
+
+
+def build_openai_chat_input(messages: list[dict]) -> list[dict]:
+    input_messages: list[dict] = []
+    for message in messages:
+        role = str(message.get("role") or "").strip().lower()
+        content = str(message.get("content") or "")
+        if role not in {"user", "assistant"} or not content.strip():
+            continue
+        input_messages.append(
+            {
+                "role": role,
+                "content": content,
+            }
+        )
+    return input_messages
+
+
+def truncate_meshtastic_text(text: str, max_bytes: int = MAX_MESHTASTIC_TEXT_BYTES) -> str:
+    raw = (text or "").encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text or ""
+
+    suffix = "..."
+    suffix_bytes = suffix.encode("utf-8")
+    allowed = max(0, max_bytes - len(suffix_bytes))
+    trimmed = raw[:allowed]
+    while trimmed:
+        try:
+            decoded = trimmed.decode("utf-8")
+            return decoded.rstrip() + suffix
+        except UnicodeDecodeError:
+            trimmed = trimmed[:-1]
+    return suffix[:max_bytes]
+
+
 def append_jsonl(log_path: Path | None, event_type: str, payload: dict) -> None:
     if log_path is None:
         return
@@ -1645,6 +1881,15 @@ def reload_listen_runtime_settings(settings: dict) -> tuple[list[str], list[tupl
             continue
         settings[key] = autoresponder_settings[key]
         sources[key] = autoresponder_sources.get(key, "default")
+
+    chatbot_settings, chatbot_sources = load_config_with_sources(CHATBOT_CONFIG_PATH, "chatbot")
+    if CHATBOT_CONFIG_PATH.exists():
+        changed_families.append("chatbot")
+    for key in CHATBOT_HOT_RELOAD_KEYS:
+        if source_is_runtime_override(sources.get(key)):
+            continue
+        settings[key] = chatbot_settings[key]
+        sources[key] = chatbot_sources.get(key, "default")
 
     send_settings, send_sources = load_config_with_sources(SEND_CONFIG_PATH, "send")
     if SEND_CONFIG_PATH.exists():
@@ -1814,6 +2059,7 @@ def packet_matches_listen_filters(interface: SerialInterface, packet: dict, sett
 
 
 def build_receive_record(interface: SerialInterface, packet: dict) -> dict:
+    timestamp = now_string()
     sender_id = packet.get("fromId") or str(packet.get("from", "unknown"))
     sender_node = interface.nodes.get(sender_id, {})
     sender_user = sender_node.get("user", {})
@@ -1821,6 +2067,7 @@ def build_receive_record(interface: SerialInterface, packet: dict) -> dict:
     sender_long_name = sender_user.get("longName", "")
     sender_label = sender_long_name or sender_short_name or get_recipient_label(interface, sender_id)
     receiver_id = packet.get("toId") or str(packet.get("to", "unknown"))
+    decoded = packet.get("decoded", {})
     text = extract_text(packet)
     channel = packet_channel(interface, packet)
     raw_channel = packet_raw_channel(packet)
@@ -1832,21 +2079,44 @@ def build_receive_record(interface: SerialInterface, packet: dict) -> dict:
             raw_value = None
         if raw_value is not None and not 0 <= raw_value <= 7:
             hashed_channel = channel_from_hash(interface, raw_value)
-    portnum = packet.get("decoded", {}).get("portnum", "UNKNOWN")
+    portnum = decoded.get("portnum", "UNKNOWN")
     dm = is_direct_message(packet)
+    hop_start = packet.get("hopStart")
+    hop_limit = packet.get("hopLimit")
+    try:
+        hop_start_int = int(hop_start) if hop_start is not None else None
+    except (TypeError, ValueError):
+        hop_start_int = None
+    try:
+        hop_limit_int = int(hop_limit) if hop_limit is not None else None
+    except (TypeError, ValueError):
+        hop_limit_int = None
+    hops_used = None
+    if hop_start_int is not None and hop_limit_int is not None:
+        hops_used = max(0, hop_start_int - hop_limit_int)
     return {
+        "timestamp": timestamp,
         "from_id": sender_id,
         "from_label": sender_label,
         "from_short_name": sender_short_name,
         "from_long_name": sender_long_name,
         "to_id": receiver_id,
+        "packet_id": packet.get("id"),
         "channel_index": channel,
         "channel_name": channel_name(interface, channel),
         "raw_channel": raw_channel,
         "channel_hash_match": hashed_channel,
         "scope": "dm" if dm else "group",
         "portnum": portnum,
+        "rx_snr": packet.get("rxSnr"),
+        "rx_rssi": packet.get("rxRssi"),
+        "hop_start": hop_start_int if hop_start_int is not None else hop_start,
+        "hop_limit": hop_limit_int if hop_limit_int is not None else hop_limit,
+        "hops_used": hops_used,
+        "want_ack": packet.get("wantAck"),
+        "priority": packet.get("priority"),
         "text": text,
+        "decoded": sanitize_for_json(decoded),
         "packet": sanitize_for_json(packet),
     }
 
@@ -1879,9 +2149,41 @@ def is_text_message_port(portnum) -> bool:
     return str(portnum or "UNKNOWN") in {"TEXT_MESSAGE_APP", "TEXT_MESSAGE_COMPRESSED_APP"}
 
 
-def format_receive_line(record: dict) -> str:
-    scope_text = record["scope"].upper()
-    scope = colorize(scope_text, "green" if scope_text == "DM" else "cyan", bold=True)
+def parse_receive_color_template(color_template: str | None) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    if not color_template:
+        return mapping
+    for entry in str(color_template).split(";"):
+        item = entry.strip()
+        if not item or "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if key and value:
+            mapping[key] = value
+    return mapping
+
+
+def apply_named_color(text: str, color_name: str | None, record: dict | None = None) -> str:
+    if not text or not color_name:
+        return text
+    normalized = color_name.strip().lower()
+    if normalized in {"none", "default", ""}:
+        return text
+    if normalized == "scope_auto":
+        scope_text = str((record or {}).get("scope", "")).upper()
+        return colorize(text, "green" if scope_text == "DM" else "cyan", bold=True)
+    bold = normalized.endswith("_bold")
+    base_color = normalized[:-5] if bold else normalized
+    if base_color not in ANSI_COLORS:
+        return text
+    return colorize(text, base_color, bold=bold)
+
+
+def build_receive_template_values(record: dict) -> dict[str, str]:
+    text = record.get("text")
+    payload_display = f": {text}" if text else f" [{record.get('portnum', 'UNKNOWN')}]"
     if record["channel_index"] is None:
         if record.get("raw_channel") is None:
             channel = "unknown"
@@ -1896,22 +2198,73 @@ def format_receive_line(record: dict) -> str:
         channel = f"{record['channel_index']}:{record['channel_name']}"
     else:
         channel = str(record["channel_index"])
-    port_label = format_port_label(record["portnum"])
-    channel = colorize(f"ch={channel}", "magenta")
-    port_label = colorize(f"port={port_label}", "blue")
-    sender = colorize(f"{record['from_label']} ({record['from_id']})", "white", bold=True)
-    target = colorize(record["to_id"], "white")
-    text = record["text"]
-    if text:
-        return (
-            f"[{now_string()}] {scope} {channel} {port_label} "
-            f"{sender} -> {target}: {text}"
-        )
-    return (
-        f"[{now_string()}] {scope} {channel} {port_label} "
-        f"{sender} -> {target} "
-        f"[{record['portnum']}]"
-    )
+    return {
+        "timestamp": str(record.get("timestamp") or now_string()),
+        "node_id": str(record.get("from_id") or ""),
+        "label": str(record.get("from_label") or ""),
+        "shortname": str(record.get("from_short_name") or ""),
+        "longname": str(record.get("from_long_name") or ""),
+        "to_id": str(record.get("to_id") or ""),
+        "packet_id": "" if record.get("packet_id") is None else str(record.get("packet_id")),
+        "message": str(text or ""),
+        "channel_index": "" if record.get("channel_index") is None else str(record.get("channel_index")),
+        "channel_name": str(record.get("channel_name") or ""),
+        "raw_channel": "" if record.get("raw_channel") is None else str(record.get("raw_channel")),
+        "scope": str(record.get("scope") or ""),
+        "scope_label": str(record.get("scope") or "").upper(),
+        "portnum": str(record.get("portnum") or ""),
+        "rxsnr": "" if record.get("rx_snr") is None else str(record.get("rx_snr")),
+        "rxrssi": "" if record.get("rx_rssi") is None else str(record.get("rx_rssi")),
+        "hopstart": "" if record.get("hop_start") is None else str(record.get("hop_start")),
+        "hoplimit": "" if record.get("hop_limit") is None else str(record.get("hop_limit")),
+        "hopsused": "" if record.get("hops_used") is None else str(record.get("hops_used")),
+        "wantack": "" if record.get("want_ack") is None else str(record.get("want_ack")).lower(),
+        "priority": "" if record.get("priority") is None else str(record.get("priority")),
+        "packet_json": json.dumps(record.get("packet", {}), ensure_ascii=True, sort_keys=True),
+        "decoded_json": json.dumps(record.get("decoded", {}), ensure_ascii=True, sort_keys=True),
+        "answer": "",
+        "channel_display": f"ch={channel}",
+        "port_label": f"port={format_port_label(record['portnum'])}",
+        "sender_display": f"{record['from_label']} ({record['from_id']})",
+        "target_display": str(record.get("to_id") or ""),
+        "payload_display": payload_display,
+    }
+
+
+def render_receive_template(record: dict, settings: dict | None = None) -> str:
+    template = (settings or {}).get("listen_receive_template") if settings else None
+    if not template:
+        template = DEFAULT_SETTINGS["listen_receive_template"]
+    color_template = (settings or {}).get("listen_receive_color_template") if settings else None
+    if not color_template:
+        color_template = DEFAULT_SETTINGS["listen_receive_color_template"]
+
+    values = build_receive_template_values(record)
+    color_map = parse_receive_color_template(color_template)
+
+    parts: list[str] = []
+    template_text = str(template)
+    cursor = 0
+    while cursor < len(template_text):
+        start = template_text.find("%", cursor)
+        if start == -1:
+            parts.append(template_text[cursor:])
+            break
+        end = template_text.find("%", start + 1)
+        if end == -1:
+            parts.append(template_text[cursor:])
+            break
+        if start > cursor:
+            parts.append(template_text[cursor:start])
+        placeholder = template_text[start + 1 : end]
+        value = values.get(placeholder, "")
+        parts.append(apply_named_color(value, color_map.get(placeholder), record))
+        cursor = end + 1
+    return "".join(parts)
+
+
+def format_receive_line(record: dict, settings: dict | None = None) -> str:
+    return render_receive_template(record, settings)
 
 
 def history_matches_filter(entry: dict, history_filter: str) -> bool:
@@ -2014,27 +2367,149 @@ def autoresponder_message_matches(record: dict, settings: dict) -> bool:
     return text_matches_filter(record.get("text"), message_filter)
 
 
-def build_autoresponder_reply_text(record: dict, settings: dict) -> str:
+def autoresponder_template_uses_ai(settings: dict) -> bool:
+    template = settings.get("autoresponder_reply_template") or ""
+    template_text = str(template)
+    return "%KI_Answer%" in template_text or "%KI_answer%" in template_text
+
+
+def autoresponder_has_reply_source(settings: dict) -> bool:
+    return bool((settings.get("autoresponder_reply_template") or "").strip() or (settings.get("autoresponder_reply") or "").strip())
+
+
+def extract_openai_response_text(response_payload: dict) -> str:
+    output_text = response_payload.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
+
+    parts: list[str] = []
+    for item in response_payload.get("output", []) or []:
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content", []) or []:
+            if content.get("type") == "output_text":
+                text = content.get("text")
+                if text:
+                    parts.append(str(text))
+    return "\n".join(part.strip() for part in parts if str(part).strip()).strip()
+
+
+def fetch_ki_answer(record: dict, settings: dict) -> str:
+    env_name = (settings.get("chatbot_api_key_env") or "OPENAI_API_KEY").strip() or "OPENAI_API_KEY"
+    direct_key = env_name if env_name.startswith("sk-") else ""
+    api_key = direct_key or os.environ.get(env_name)
+    if not api_key:
+        raise RuntimeError(f"OpenAI API key not found. Please set the environment variable {env_name}.")
+
+    user_message = str(record.get("text") or "").strip()
+    if not user_message:
+        raise RuntimeError("No incoming text found for %KI_Answer%.")
+
+    history = load_chatbot_history(record.get("from_id"))
+    conversation_messages = list(history.get("messages", []))
+    conversation_messages.append(
+        {
+            "role": "user",
+            "content": user_message,
+            "timestamp": now_string(),
+            "packet_id": record.get("packet_id"),
+        }
+    )
+
+    request_payload = {
+        "model": settings.get("chatbot_model") or DEFAULT_SETTINGS["chatbot_model"],
+        "instructions": settings.get("chatbot_system_prompt") or DEFAULT_SETTINGS["chatbot_system_prompt"],
+        "input": build_openai_chat_input(trim_chatbot_history(conversation_messages)),
+        "max_output_tokens": int(settings.get("chatbot_max_output_tokens") or DEFAULT_SETTINGS["chatbot_max_output_tokens"]),
+        "store": False,
+    }
+    timeout = int(settings.get("chatbot_timeout") or DEFAULT_SETTINGS["chatbot_timeout"])
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(request_payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        details = ""
+        try:
+            error_payload = json.loads(exc.read().decode("utf-8"))
+            details = error_payload.get("error", {}).get("message") or ""
+        except Exception:
+            details = ""
+        detail_suffix = f" {details}" if details else ""
+        raise RuntimeError(f"OpenAI request failed with HTTP {exc.code}.{detail_suffix}".strip()) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"OpenAI request failed: {exc.reason}") from exc
+
+    answer = extract_openai_response_text(response_payload)
+    if not answer:
+        raise RuntimeError("OpenAI returned no text for %KI_Answer%.")
+    conversation_messages.append(
+        {
+            "role": "assistant",
+            "content": answer.strip(),
+            "timestamp": now_string(),
+            "response_id": response_payload.get("id"),
+        }
+    )
+    save_chatbot_history(record.get("from_id"), conversation_messages)
+    return answer.strip()
+
+
+def build_autoresponder_reply_text(record: dict, settings: dict, ki_answer: str = "") -> str:
     base_answer = (settings.get("autoresponder_reply") or "").strip()
     template = (settings.get("autoresponder_reply_template") or "").strip()
     if not template:
         return base_answer
 
+    packet_json = json.dumps(record.get("packet", {}), ensure_ascii=True, sort_keys=True)
+    decoded_json = json.dumps(record.get("decoded", {}), ensure_ascii=True, sort_keys=True)
     replacements = {
         "%node_id%": str(record.get("from_id") or ""),
         "%label%": str(record.get("from_label") or ""),
         "%shortname%": str(record.get("from_short_name") or ""),
         "%longname%": str(record.get("from_long_name") or ""),
+        "%to_id%": str(record.get("to_id") or ""),
+        "%packet_id%": "" if record.get("packet_id") is None else str(record.get("packet_id")),
         "%message%": str(record.get("text") or ""),
         "%channel_index%": "" if record.get("channel_index") is None else str(record.get("channel_index")),
         "%channel_name%": str(record.get("channel_name") or ""),
+        "%raw_channel%": "" if record.get("raw_channel") is None else str(record.get("raw_channel")),
         "%scope%": str(record.get("scope") or ""),
+        "%portnum%": str(record.get("portnum") or ""),
+        "%rxsnr%": "" if record.get("rx_snr") is None else str(record.get("rx_snr")),
+        "%rxrssi%": "" if record.get("rx_rssi") is None else str(record.get("rx_rssi")),
+        "%hopstart%": "" if record.get("hop_start") is None else str(record.get("hop_start")),
+        "%hoplimit%": "" if record.get("hop_limit") is None else str(record.get("hop_limit")),
+        "%hopsused%": "" if record.get("hops_used") is None else str(record.get("hops_used")),
+        "%wantack%": "" if record.get("want_ack") is None else str(record.get("want_ack")).lower(),
+        "%priority%": "" if record.get("priority") is None else str(record.get("priority")),
+        "%packet_json%": packet_json,
+        "%decoded_json%": decoded_json,
         "%answer%": base_answer,
+        "%KI_Answer%": ki_answer,
+        "%KI_answer%": ki_answer,
     }
     reply_text = template
     for placeholder, value in replacements.items():
         reply_text = reply_text.replace(placeholder, value)
     return reply_text.strip()
+
+
+def resolve_autoresponder_reply_text(record: dict, settings: dict) -> str:
+    ki_answer = ""
+    if autoresponder_template_uses_ai(settings):
+        ki_answer = fetch_ki_answer(record, settings)
+    reply_text = build_autoresponder_reply_text(record, settings, ki_answer=ki_answer)
+    return truncate_meshtastic_text(reply_text, MAX_MESHTASTIC_TEXT_BYTES)
 
 
 def should_autorespond(interface: SerialInterface, packet: dict, record: dict, settings: dict) -> bool:
@@ -2054,8 +2529,7 @@ def should_autorespond(interface: SerialInterface, packet: dict, record: dict, s
         return False
     if not autoresponder_message_matches(record, settings):
         return False
-    reply_text = build_autoresponder_reply_text(record, settings)
-    if not reply_text:
+    if not autoresponder_has_reply_source(settings):
         return False
     return True
 
@@ -2097,6 +2571,14 @@ def resolve_autoresponder_targets(
     return selected, channel_index, channel_name(interface, channel_index), target_description
 
 
+def should_autorespond_to_group(record: dict, settings: dict) -> bool:
+    if settings.get("autoresponder_unicast"):
+        return False
+    if str(record.get("scope") or "") != "group":
+        return False
+    return record.get("channel_index") in {0, 1}
+
+
 def send_autoresponse(
     interface: SerialInterface,
     record: dict,
@@ -2104,13 +2586,55 @@ def send_autoresponse(
     log_path: Path | None,
     history_path: Path,
 ) -> None:
-    reply_text = build_autoresponder_reply_text(record, settings)
+    reply_text = resolve_autoresponder_reply_text(record, settings)
+    if not reply_text:
+        print(colorize("Autoresponder reply resolved to empty text, nothing will be sent.", "yellow"))
+        return
     try:
         targets, channel_index, resolved_channel_name, target_description = resolve_autoresponder_targets(
             interface, record, settings
         )
     except ValueError as exc:
         print(colorize(f"Autoresponder target selection failed: {exc}", "red", bold=True))
+        return
+
+    if should_autorespond_to_group(record, settings):
+        group_channel_index = record.get("channel_index")
+        if group_channel_index is None:
+            group_channel_index = 0
+        group_channel_name = record.get("channel_name") or channel_name(interface, group_channel_index)
+        packet = interface.sendText(
+            reply_text,
+            destinationId="^all",
+            wantAck=False,
+            channelIndex=group_channel_index,
+        )
+        packet_id = getattr(packet, "id", "unknown")
+        channel_text = f"{group_channel_index}:{group_channel_name}" if group_channel_name else str(group_channel_index)
+        print(
+            colorize(
+                f"Queued broadcast to group on ch={channel_text}: {reply_text} [autoresponder]",
+                "cyan",
+            )
+        )
+        payload = {
+            "recipient_id": "^all",
+            "recipient_label": group_channel_name or "^all",
+            "channel_index": group_channel_index,
+            "channel_name": group_channel_name,
+            "message": reply_text,
+            "packet_id": packet_id,
+            "result": "queued_to_group",
+            "ki_answer_used": autoresponder_template_uses_ai(settings),
+            "chatbot_model": settings.get("chatbot_model") if autoresponder_template_uses_ai(settings) else "",
+            "source_text": record.get("text"),
+            "source_sender_filter": settings.get("autoresponder_sender_filter", ""),
+            "source_message_filter": settings.get("autoresponder_message_filter", ""),
+            "autoresponder_unicast": settings.get("autoresponder_unicast", False),
+            "target_description": "triggering group channel",
+        }
+        append_jsonl(log_path, "autoresponse", payload)
+        append_history(history_path, "send_autoresponse", payload)
         return
 
     if not targets:
@@ -2182,6 +2706,8 @@ def send_autoresponse(
             "message": reply_text,
             "packet_id": packet_id,
             "result": result,
+            "ki_answer_used": autoresponder_template_uses_ai(settings),
+            "chatbot_model": settings.get("chatbot_model") if autoresponder_template_uses_ai(settings) else "",
             "source_text": record.get("text"),
             "source_sender_filter": settings.get("autoresponder_sender_filter", ""),
             "source_message_filter": settings.get("autoresponder_message_filter", ""),
@@ -2199,6 +2725,7 @@ def run_listen_mode(interface: SerialInterface, settings: dict) -> int:
     watched_cfg_paths = {
         "listen": LISTEN_CONFIG_PATH,
         "autoresponder": AUTORESPONDER_CONFIG_PATH,
+        "chatbot": CHATBOT_CONFIG_PATH,
         "send": SEND_CONFIG_PATH,
     }
     cfg_mtimes = {family: file_mtime_ns(path) for family, path in watched_cfg_paths.items()}
@@ -2215,14 +2742,21 @@ def run_listen_mode(interface: SerialInterface, settings: dict) -> int:
             ("listen_group_only", settings["listen_group_only"]),
             ("listen_text_only", settings["listen_text_only"]),
             ("listen_verbose", settings["listen_verbose"]),
+            ("listen_receive_template", settings["listen_receive_template"]),
+            ("listen_receive_color_template", settings["listen_receive_color_template"]),
             ("autoresponder", settings["autoresponder"]),
             ("autoresponder_unicast", settings["autoresponder_unicast"]),
-            ("autoresponder_sender_mode", settings["autoresponder_sender_mode"]),
-            ("autoresponder_sender_filter", settings["autoresponder_sender_filter"]),
-            ("autoresponder_message_mode", settings["autoresponder_message_mode"]),
-            ("autoresponder_message_filter", settings["autoresponder_message_filter"]),
+            ("autoresponder_sender_mode", "trigger_node_mode", settings["autoresponder_sender_mode"]),
+            ("autoresponder_sender_filter", "trigger_node_filter", settings["autoresponder_sender_filter"]),
+            ("autoresponder_message_mode", "trigger_message_mode", settings["autoresponder_message_mode"]),
+            ("autoresponder_message_filter", "trigger_message_filter", settings["autoresponder_message_filter"]),
             ("autoresponder_reply", settings["autoresponder_reply"]),
             ("autoresponder_reply_template", settings["autoresponder_reply_template"]),
+            ("chatbot_model", settings["chatbot_model"]),
+            ("chatbot_system_prompt", settings["chatbot_system_prompt"]),
+            ("chatbot_max_output_tokens", settings["chatbot_max_output_tokens"]),
+            ("chatbot_timeout", settings["chatbot_timeout"]),
+            ("chatbot_api_key_env", settings["chatbot_api_key_env"]),
             ("autoresponder_send_channel_index", "send_channel_index", settings.get("autoresponder_send_channel_index")),
             ("autoresponder_send_target_mode", "send_target_mode", settings.get("autoresponder_send_target_mode")),
             ("autoresponder_send_target_filter", "send_target_filter", settings.get("autoresponder_send_target_filter")),
@@ -2259,7 +2793,10 @@ def run_listen_mode(interface: SerialInterface, settings: dict) -> int:
     if settings["autoresponder"]:
         print(colorize("Autoresponder: enabled", "magenta", bold=True))
         if not (settings.get("autoresponder_reply") or "").strip():
-            print(colorize("Autoresponder reply text is empty, so no replies will be sent.", "yellow"))
+            if not autoresponder_template_uses_ai(settings):
+                print(colorize("Autoresponder reply text is empty, so no replies will be sent.", "yellow"))
+        if autoresponder_template_uses_ai(settings):
+            print(colorize("Autoresponder KI_Answer mode: enabled", "magenta"))
 
     def maybe_reload_runtime_config() -> None:
         nonlocal log_path, history_path, cfg_mtimes
@@ -2314,7 +2851,7 @@ def run_listen_mode(interface: SerialInterface, settings: dict) -> int:
             return
         received_count += 1
         record = build_receive_record(interface, packet)
-        print(format_receive_line(record))
+        print(format_receive_line(record, settings))
         if settings["listen_verbose"]:
             print(colorize(f"  record: {json.dumps(record, ensure_ascii=True, sort_keys=True)}", "blue"))
         append_jsonl(log_path, "receive", record)

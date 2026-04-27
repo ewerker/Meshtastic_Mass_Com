@@ -1,13 +1,13 @@
 # Meshtastic_Mass_Com
 
-Current version: `0.7.6`
+Current version: `0.7.7`
 
 English documentation. German version: [README.de.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\README.de.md)
 Release notes: [CHANGELOG.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\CHANGELOG.md)
 
 Copyright (c) 2026 Frank Richter, [w-2.de](https://w-2.de)
 
-Small Python utility for Meshtastic communication workflows: direct messages, group broadcasts, live listening, logging, history, and separate local config files for send and listen workflows.
+Small Python utility for Meshtastic communication workflows: direct messages, group broadcasts, live listening, logging, history, AI-backed autoresponder behavior, and separate local config files for send, listen, autoresponder, and chatbot workflows.
 
 ## Related Project
 
@@ -45,6 +45,7 @@ The tool is probably not the main thing you need if you only:
 - Run a live listener with channel, sender, scope, and text filtering.
 - Keep a local JSONL activity log plus a separate local history/inbox.
 - Use cfg-driven autoresponder rules for specific senders or trigger texts.
+- Use an optional OpenAI-backed chatbot responder with reusable per-node conversation context.
 - Let the listener reload updated cfg files without restarting the whole workflow.
 
 ## Features
@@ -61,7 +62,10 @@ The tool is probably not the main thing you need if you only:
 - Can send a real group/broadcast message on a selected channel
 - Can run in dry-run mode without transmitting
 - Can keep a local history/inbox and show recent entries later
-- Stores runtime settings in separate send/listen `.cfg` files
+- Can use `%KI_Answer%` inside autoresponder templates to ask a fast OpenAI model for a reply
+- Stores one JSON conversation history file per requesting node for follow-up AI responses
+- Can answer group traffic back into the same incoming group channel on channel `0` or `1`
+- Stores runtime settings in separate send/listen/autoresponder/chatbot `.cfg` files
 - Supports unattended runs without prompts
 - Can protect the config from changes or force config updates explicitly
 
@@ -88,9 +92,36 @@ MIT License. See [LICENSE](C:\Users\richt\Documents\Codex\Meshtastic_tool\LICENS
 - Script: [meshtastic_mass_com.py](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.py)
 - Send config: [meshtastic_mass_com.send.cfg](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.send.cfg)
 - Listen config: [meshtastic_mass_com.listen.cfg](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.listen.cfg)
+- Autoresponder config: [meshtastic_mass_com.autoresponder.cfg](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.autoresponder.cfg)
+- Chatbot config: [meshtastic_mass_com.chatbot.cfg](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.chatbot.cfg)
 - Default send history: [meshtastic_mass_com.send.history.jsonl](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.send.history.jsonl)
 - Default listen history: [meshtastic_mass_com.listen.history.jsonl](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.listen.history.jsonl)
+- Default chatbot history directory: `meshtastic_mass_com.chatbot_history/`
 - German documentation: [README.de.md](C:\Users\richt\Documents\Codex\Meshtastic_tool\README.de.md)
+
+## AI Autoresponder
+
+The autoresponder can optionally ask OpenAI for a reply when the autoresponder reply template contains `%KI_Answer%` or `%KI_answer%`.
+
+How it works:
+
+- The incoming radio text is sent to the configured OpenAI model together with the chatbot system prompt.
+- One local JSON conversation file is kept per requesting node.
+- Follow-up questions from the same node reuse that stored conversation context automatically.
+- Only the newest 9 assistant replies are kept per node so the context stays compact.
+- Final outgoing Meshtastic replies are truncated automatically to the device text payload limit.
+
+Files involved:
+
+- Autoresponder rules: [meshtastic_mass_com.autoresponder.cfg](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.autoresponder.cfg)
+- OpenAI/chatbot settings: [meshtastic_mass_com.chatbot.cfg](C:\Users\richt\Documents\Codex\Meshtastic_tool\meshtastic_mass_com.chatbot.cfg)
+- Per-node conversation store: `meshtastic_mass_com.chatbot_history/<node>.json`
+
+Example template:
+
+```ini
+autoresponder_reply_template = Autoresponder triggered by %shortname%: %message% / Answer: %KI_Answer%
+```
 
 ## First Run
 

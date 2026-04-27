@@ -19,6 +19,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SEND_CFG_NAME = "meshtastic_mass_com.send.cfg"
 LISTEN_CFG_NAME = "meshtastic_mass_com.listen.cfg"
 AUTORESPONDER_CFG_NAME = "meshtastic_mass_com.autoresponder.cfg"
+CHATBOT_CFG_NAME = "meshtastic_mass_com.chatbot.cfg"
 SEND_HISTORY_NAME = "meshtastic_mass_com.send.history.jsonl"
 LISTEN_HISTORY_NAME = "meshtastic_mass_com.listen.history.jsonl"
 SETTINGS_SECTION = "settings"
@@ -33,6 +34,7 @@ class FieldSpec:
     help_text: str
     choices: tuple[str, ...] = ()
     width: int = 18
+    height: int = 4
 
 
 SEND_FIELDS = [
@@ -61,12 +63,14 @@ SEND_FIELDS = [
 LISTEN_FIELDS = [
     FieldSpec("port", "Serial Port", "text", "", "Serial port used for listening. Examples: /dev/ttyUSB0, /dev/ttyACM0, or COM7."),
     FieldSpec("timeout", "Timeout (s)", "int", 30, "Connection timeout for the listen workflow. Example: 30."),
-    FieldSpec("listen_filter", "Listen Filter", "text", "*", "Only show packets whose sender matches this filter. Example: FR*."),
-    FieldSpec("listen_channel_index", "Listen Channel", "optional_int", "", "Only show packets for this channel index. Leave blank for all. Example: 1."),
+    FieldSpec("listen_filter", "Node Filter", "text", "*", "Only show packets whose sender matches this filter. Example: FR*."),
+    FieldSpec("listen_channel_index", "Channel Filter", "optional_int", "", "Only show packets for this channel index. Leave blank for all. Example: 1."),
     FieldSpec("listen_dm_only", "DM Only", "bool", False, "Only show direct messages while listening. Example: disabled."),
     FieldSpec("listen_group_only", "Group Only", "bool", False, "Only show group or broadcast traffic while listening. Example: disabled."),
     FieldSpec("listen_text_only", "Text Only", "bool", False, "Only show text packets while listening. Example: enabled."),
     FieldSpec("listen_verbose", "Verbose Mode (--verbose-listen)", "bool", False, "Also print the full received record as JSON, similar to the receive log. This maps to the CLI switch --verbose-listen. Example: enabled."),
+    FieldSpec("listen_receive_template", "Receive Template", "text", "[%timestamp%] %scope_label% %channel_display% %port_label% %sender_display% -> %target_display%%payload_display%", "Template for the receive list line. Supports autoresponder variables plus receive-display variables such as %timestamp%, %scope_label%, %channel_display%, %port_label%, %sender_display%, %target_display%, and %payload_display%."),
+    FieldSpec("listen_receive_color_template", "Receive Color Template", "text", "timestamp=gray;scope_label=scope_auto;channel_display=magenta;port_label=blue;sender_display=white_bold;target_display=white;payload_display=gray", "Color map for receive placeholders. Format: placeholder=color;placeholder=color. Supports red, green, yellow, blue, magenta, cyan, white, gray, *_bold, and scope_auto."),
     FieldSpec("unattended", "Unattended", "bool", False, "Skip prompts such as serial port selection; all required values must come from cfg or CLI. Example: disabled."),
     FieldSpec("log_file", "Log File", "text", "", "Optional JSONL listen log file. Example: ./logs/listen_log.jsonl."),
     FieldSpec("log_rotate_max_mb", "Log Rotate MB", "int", 10, "Rotate the log file after this size in MB. Example: 10."),
@@ -80,12 +84,21 @@ LISTEN_FIELDS = [
 AUTORESPONDER_FIELDS = [
     FieldSpec("autoresponder", "Enabled", "bool", False, "Enable the autoresponder by default for listen mode. Example: enabled."),
     FieldSpec("autoresponder_unicast", "Unicast Mode", "bool", False, "Send direct replies to the recipients selected by the send cfg instead of only back to the triggering sender. Example: enabled."),
-    FieldSpec("autoresponder_sender_mode", "Sender Mode", "choice", "all", "Which senders may trigger replies. Example: filter.", ("all", "filter")),
-    FieldSpec("autoresponder_sender_filter", "Sender Filter", "text", "JR*", "Sender filter for node ID, short name, or long name. Example: JR or JR*."),
-    FieldSpec("autoresponder_message_mode", "Message Mode", "choice", "filter", "Which messages may trigger replies. Example: filter.", ("all", "filter")),
-    FieldSpec("autoresponder_message_filter", "Message Filter", "text", "!Ping", "Message text filter. Without wildcards it works like contains. Example: !Ping."),
+    FieldSpec("autoresponder_sender_mode", "Trigger Node Mode", "choice", "all", "Which nodes may trigger replies. Example: filter.", ("all", "filter")),
+    FieldSpec("autoresponder_sender_filter", "Trigger Node Filter", "text", "JR*", "Trigger node filter for node ID, short name, or long name. Example: JR or JR*."),
+    FieldSpec("autoresponder_message_mode", "Trigger Message Mode", "choice", "filter", "Which messages may trigger replies. Example: filter.", ("all", "filter")),
+    FieldSpec("autoresponder_message_filter", "Trigger Message Filter", "text", "!Ping", "Trigger message filter. Without wildcards it works like contains. Example: !Ping."),
     FieldSpec("autoresponder_reply", "Reply Text", "text", "Pong", "Fixed direct-message reply text. Example: Pong."),
-    FieldSpec("autoresponder_reply_template", "Reply Template", "text", "Autoresponder triggered by  %shortname%: %message% / Answer:  %answer%", "Optional template with trigger variables. Variables: %node_id%, %label%, %shortname%, %longname%, %message%, %channel_index%, %channel_name%, %scope%, %answer%. %answer% is replaced with the configured autoresponder_reply text. Example: Autoresponder triggered by  %shortname%: %message% / Answer:  %answer%"),
+    FieldSpec("autoresponder_reply_template", "Reply Template", "text", "Autoresponder triggered by  %shortname%: %message% / Answer:  %answer%", "Optional template with trigger variables. Variables: %node_id%, %label%, %shortname%, %longname%, %to_id%, %packet_id%, %message%, %channel_index%, %channel_name%, %raw_channel%, %scope%, %portnum%, %rxsnr%, %rxrssi%, %hopstart%, %hoplimit%, %hopsused%, %wantack%, %priority%, %packet_json%, %decoded_json%, %answer%, %KI_Answer%, %KI_answer%. %answer% is replaced with the configured autoresponder_reply text. %KI_Answer% and %KI_answer% trigger the OpenAI chatbot cfg. Example: Autoresponder triggered by  %shortname%: %message% / Answer:  %answer%"),
+]
+
+
+CHATBOT_FIELDS = [
+    FieldSpec("chatbot_model", "OpenAI Model", "text", "gpt-4.1-mini", "Fast OpenAI model used when %KI_Answer% appears in the autoresponder reply template. Example: gpt-4.1-mini."),
+    FieldSpec("chatbot_system_prompt", "System Prompt", "multiline", "Du bist ein hilfreicher Antwortbot, der Fragen beantwortet die per Funk gestellt werden.", "System prompt sent to the model together with the received radio message. The conversation is stored per requesting node and reused automatically.", height=8),
+    FieldSpec("chatbot_max_output_tokens", "Max Output Tokens", "int", 160, "Maximum output tokens for the AI answer. Keep this compact for radio use. Example: 160."),
+    FieldSpec("chatbot_timeout", "HTTP Timeout (s)", "int", 20, "Timeout for the OpenAI API call. Example: 20."),
+    FieldSpec("chatbot_api_key_env", "API Key Env Var", "text", "OPENAI_API_KEY", "Environment variable name that contains the OpenAI API key. Example: OPENAI_API_KEY."),
 ]
 
 
@@ -111,11 +124,17 @@ class ConfigLogic:
         return ConfigLogic.defaults_from_specs(AUTORESPONDER_FIELDS)
 
     @staticmethod
+    def default_chatbot_settings() -> dict:
+        return ConfigLogic.defaults_from_specs(CHATBOT_FIELDS)
+
+    @staticmethod
     def config_path(output_dir: Path, family: str) -> Path:
         if family == "listen":
             return output_dir / LISTEN_CFG_NAME
         if family == "autoresponder":
             return output_dir / AUTORESPONDER_CFG_NAME
+        if family == "chatbot":
+            return output_dir / CHATBOT_CFG_NAME
         return output_dir / SEND_CFG_NAME
 
     @staticmethod
@@ -130,6 +149,8 @@ class ConfigLogic:
     @staticmethod
     def validate_value(spec: FieldSpec, raw_value) -> object:
         if spec.field_type == "text":
+            return str(raw_value).strip()
+        if spec.field_type == "multiline":
             return str(raw_value).strip()
         if spec.field_type == "choice":
             value = str(raw_value).strip()
@@ -172,14 +193,16 @@ class ConfigLogic:
         return {key: value for key, value in parser[section_name].items()}
 
     @staticmethod
-    def load_cfg_set(output_dir: Path) -> tuple[dict, dict, dict]:
+    def load_cfg_set(output_dir: Path) -> tuple[dict, dict, dict, dict]:
         send_settings = ConfigLogic.default_send_settings()
         listen_settings = ConfigLogic.default_listen_settings()
         autoresponder_settings = ConfigLogic.default_autoresponder_settings()
+        chatbot_settings = ConfigLogic.default_chatbot_settings()
 
         send_path = ConfigLogic.config_path(output_dir, "send")
         listen_path = ConfigLogic.config_path(output_dir, "listen")
         autoresponder_path = ConfigLogic.config_path(output_dir, "autoresponder")
+        chatbot_path = ConfigLogic.config_path(output_dir, "chatbot")
 
         if send_path.exists():
             send_settings.update(ConfigLogic.coerce_loaded_values(send_path, SEND_FIELDS))
@@ -190,7 +213,10 @@ class ConfigLogic:
         if autoresponder_path.exists():
             autoresponder_settings.update(ConfigLogic.coerce_loaded_values(autoresponder_path, AUTORESPONDER_FIELDS))
 
-        return send_settings, listen_settings, autoresponder_settings
+        if chatbot_path.exists():
+            chatbot_settings.update(ConfigLogic.coerce_loaded_values(chatbot_path, CHATBOT_FIELDS))
+
+        return send_settings, listen_settings, autoresponder_settings, chatbot_settings
 
     @staticmethod
     def load_cfg(output_dir: Path, family: str) -> dict:
@@ -205,6 +231,9 @@ class ConfigLogic:
         elif family == "autoresponder":
             settings = ConfigLogic.default_autoresponder_settings()
             specs = AUTORESPONDER_FIELDS
+        elif family == "chatbot":
+            settings = ConfigLogic.default_chatbot_settings()
+            specs = CHATBOT_FIELDS
         else:
             settings = ConfigLogic.default_send_settings()
             specs = SEND_FIELDS
@@ -253,6 +282,10 @@ class ConfigLogic:
             specs = AUTORESPONDER_FIELDS
             family_title = "Autoresponder"
             family_modes = "autoresponder"
+        elif family == "chatbot":
+            specs = CHATBOT_FIELDS
+            family_title = "Chatbot"
+            family_modes = "chatbot"
         else:
             specs = SEND_FIELDS
             family_title = "Send workflow"
@@ -337,6 +370,13 @@ class ConfigLogic:
                     f"listen_text_only = {settings_map['listen_text_only']}",
                     "# true also prints the full received record as JSON, similar to the receive log.",
                     f"listen_verbose = {settings_map['listen_verbose']}",
+                    "# Template for the receive line. Supports autoresponder variables plus receive-display variables.",
+                    "# Extra receive variables: %timestamp%, %scope_label%, %channel_display%, %port_label%, %sender_display%, %target_display%, %payload_display%",
+                    "# Extra packet variables: %to_id%, %packet_id%, %raw_channel%, %portnum%, %rxsnr%, %rxrssi%, %hopstart%, %hoplimit%, %hopsused%, %wantack%, %priority%, %packet_json%, %decoded_json%",
+                    f"listen_receive_template = {settings_map['listen_receive_template']}",
+                    "# Color map for receive placeholders. Format: placeholder=color;placeholder=color",
+                    "# Supported colors: red, green, yellow, blue, magenta, cyan, white, gray plus *_bold variants and scope_auto.",
+                    f"listen_receive_color_template = {settings_map['listen_receive_color_template']}",
                     "",
                     "# Runtime",
                     "# true skips interactive prompts such as port selection.",
@@ -354,6 +394,26 @@ class ConfigLogic:
                     "",
                 ]
             )
+        elif family == "chatbot":
+            lines.extend(
+                [
+                    "# OpenAI chatbot",
+                    "# This cfg is used only when %KI_Answer% appears in autoresponder_reply_template.",
+                    f"chatbot_model = {settings_map['chatbot_model']}",
+                    "# System prompt sent with the incoming radio message.",
+                    f"chatbot_system_prompt = {settings_map['chatbot_system_prompt']}",
+                    "# Maximum output tokens for the AI answer.",
+                    f"chatbot_max_output_tokens = {settings_map['chatbot_max_output_tokens']}",
+                    "# HTTP timeout in seconds for the OpenAI API request.",
+                    f"chatbot_timeout = {settings_map['chatbot_timeout']}",
+                    "# Environment variable that contains the OpenAI API key.",
+                    f"chatbot_api_key_env = {settings_map['chatbot_api_key_env']}",
+                    "# Conversation history is stored as one JSON flat file per requesting node.",
+                    "# The oldest turns are dropped after 9 assistant replies.",
+                    "# Final autoresponder messages are truncated to the Meshtastic payload limit.",
+                    "",
+                ]
+            )
         else:
             lines.extend(
                 [
@@ -363,24 +423,25 @@ class ConfigLogic:
                     "# true sends direct replies to the recipients selected by the send cfg instead of only back to the triggering sender.",
                     f"autoresponder_unicast = {settings_map['autoresponder_unicast']}",
                     "",
-                    "# Sender matching",
-                    "# all = accept every sender, filter = only matching senders.",
+                    "# Trigger node matching",
+                    "# all = accept every triggering node, filter = only matching triggering nodes.",
                     f"autoresponder_sender_mode = {settings_map['autoresponder_sender_mode']}",
-                    "# Filter for sender node ID, short name, or long name.",
+                    "# Filter for trigger node ID, short name, or long name.",
                     f"autoresponder_sender_filter = {settings_map['autoresponder_sender_filter']}",
                     "",
-                    "# Message matching",
-                    "# all = answer every matching sender, filter = only when message text matches.",
+                    "# Trigger message matching",
+                    "# all = answer every matching trigger node, filter = only when message text matches.",
                     f"autoresponder_message_mode = {settings_map['autoresponder_message_mode']}",
-                    "# Message text filter. Without wildcards it behaves like contains.",
+                    "# Trigger message text filter. Without wildcards it behaves like contains.",
                     f"autoresponder_message_filter = {settings_map['autoresponder_message_filter']}",
                     "",
                     "# Reply",
                     "# Fixed direct-message reply text sent back to the sender.",
                     f"autoresponder_reply = {settings_map['autoresponder_reply']}",
                     "# Optional template with variables from the triggering message.",
-                    "# Available variables: %node_id%, %label%, %shortname%, %longname%, %message%, %channel_index%, %channel_name%, %scope%, %answer%",
+                    "# Available variables: %node_id%, %label%, %shortname%, %longname%, %to_id%, %packet_id%, %message%, %channel_index%, %channel_name%, %raw_channel%, %scope%, %portnum%, %rxsnr%, %rxrssi%, %hopstart%, %hoplimit%, %hopsused%, %wantack%, %priority%, %packet_json%, %decoded_json%, %answer%, %KI_Answer%, %KI_answer%",
                     "# %answer% is replaced with the configured autoresponder_reply text.",
+                    "# %KI_Answer% and %KI_answer% trigger the OpenAI chatbot cfg and are replaced with the model answer.",
                     "# Example: Autoresponder triggered by  %shortname%: %message% / Answer:  %answer%",
                     f"autoresponder_reply_template = {settings_map['autoresponder_reply_template']}",
                     "",
@@ -399,21 +460,25 @@ class ConfigLogic:
             )
         if family == "autoresponder":
             return f'python {script_name} --listen --autoresponder'
+        if family == "chatbot":
+            return f'python {script_name} --listen'
         return (
             f'python {script_name} --mode send --port <PORT> --channel-index 1 --ack '
             '--target-mode all --message "Hello Mesh" --timeout 60 --forcecfg'
         )
 
     @staticmethod
-    def save_cfg_files(output_dir: Path, send_settings: dict, listen_settings: dict, autoresponder_settings: dict, script_path: Path) -> tuple[Path, Path, Path]:
+    def save_cfg_files(output_dir: Path, send_settings: dict, listen_settings: dict, autoresponder_settings: dict, chatbot_settings: dict, script_path: Path) -> tuple[Path, Path, Path, Path]:
         output_dir.mkdir(parents=True, exist_ok=True)
         send_path = ConfigLogic.config_path(output_dir, "send")
         listen_path = ConfigLogic.config_path(output_dir, "listen")
         autoresponder_path = ConfigLogic.config_path(output_dir, "autoresponder")
+        chatbot_path = ConfigLogic.config_path(output_dir, "chatbot")
         send_path.write_text(ConfigLogic.render_cfg("send", send_settings, script_path), encoding="utf-8")
         listen_path.write_text(ConfigLogic.render_cfg("listen", listen_settings, script_path), encoding="utf-8")
         autoresponder_path.write_text(ConfigLogic.render_cfg("autoresponder", autoresponder_settings, script_path), encoding="utf-8")
-        return send_path, listen_path, autoresponder_path
+        chatbot_path.write_text(ConfigLogic.render_cfg("chatbot", chatbot_settings, script_path), encoding="utf-8")
+        return send_path, listen_path, autoresponder_path, chatbot_path
 
     @staticmethod
     def save_cfg(output_dir: Path, family: str, settings: dict, script_path: Path) -> Path:
@@ -442,16 +507,19 @@ class MeshtasticConfigGUI:
         self.send_specs = SEND_FIELDS
         self.listen_specs = LISTEN_FIELDS
         self.autoresponder_specs = AUTORESPONDER_FIELDS
+        self.chatbot_specs = CHATBOT_FIELDS
         self.output_dir_var = tk.StringVar(value=str(SCRIPT_DIR))
         self.status_var = tk.StringVar(value="Ready.")
 
         self.send_vars = self._create_variables(self.send_specs)
         self.listen_vars = self._create_variables(self.listen_specs)
         self.autoresponder_vars = self._create_variables(self.autoresponder_specs)
+        self.chatbot_vars = self._create_variables(self.chatbot_specs)
 
         self.send_preview = None
         self.listen_preview = None
         self.autoresponder_preview = None
+        self.chatbot_preview = None
         self.form_notebook = None
         self.preview_notebook = None
         self.load_button = None
@@ -506,9 +574,11 @@ class MeshtasticConfigGUI:
         send_tab, send_content = self._create_scrollable_tab(self.form_notebook)
         listen_tab, listen_content = self._create_scrollable_tab(self.form_notebook)
         autoresponder_tab, autoresponder_content = self._create_scrollable_tab(self.form_notebook)
+        chatbot_tab, chatbot_content = self._create_scrollable_tab(self.form_notebook)
         self.form_notebook.add(send_tab, text="Send CFG")
         self.form_notebook.add(listen_tab, text="Listen CFG")
         self.form_notebook.add(autoresponder_tab, text="Autoresponder CFG")
+        self.form_notebook.add(chatbot_tab, text="Chatbot CFG")
         self.form_notebook.bind("<<NotebookTabChanged>>", self._on_form_tab_changed)
 
         self._build_tab_actions(send_content, [("Start Send Script", self.start_send_script)], columns=2)
@@ -516,6 +586,7 @@ class MeshtasticConfigGUI:
         self._build_form(send_content, self.send_specs, self.send_vars, columns=2)
         self._build_form(listen_content, self.listen_specs, self.listen_vars, columns=2)
         self._build_form(autoresponder_content, self.autoresponder_specs, self.autoresponder_vars, columns=2)
+        self._build_form(chatbot_content, self.chatbot_specs, self.chatbot_vars, columns=2)
 
         self.preview_notebook = ttk.Notebook(preview_container)
         self.preview_notebook.grid(row=0, column=0, sticky="nsew")
@@ -523,13 +594,16 @@ class MeshtasticConfigGUI:
         send_preview_tab = ttk.Frame(self.preview_notebook, padding=6)
         listen_preview_tab = ttk.Frame(self.preview_notebook, padding=6)
         autoresponder_preview_tab = ttk.Frame(self.preview_notebook, padding=6)
+        chatbot_preview_tab = ttk.Frame(self.preview_notebook, padding=6)
         self.preview_notebook.add(send_preview_tab, text=SEND_CFG_NAME)
         self.preview_notebook.add(listen_preview_tab, text=LISTEN_CFG_NAME)
         self.preview_notebook.add(autoresponder_preview_tab, text=AUTORESPONDER_CFG_NAME)
+        self.preview_notebook.add(chatbot_preview_tab, text=CHATBOT_CFG_NAME)
 
         self.send_preview = self._build_preview_text(send_preview_tab)
         self.listen_preview = self._build_preview_text(listen_preview_tab)
         self.autoresponder_preview = self._build_preview_text(autoresponder_preview_tab)
+        self.chatbot_preview = self._build_preview_text(chatbot_preview_tab)
 
         status_bar = ttk.Frame(self.root, padding=(12, 4, 12, 12))
         status_bar.grid(row=2, column=0, sticky="ew")
@@ -593,7 +667,11 @@ class MeshtasticConfigGUI:
             frame.columnconfigure(0, weight=1)
 
             widget = self._create_widget(frame, spec, variables[spec.key])
-            widget.grid(row=0, column=0, sticky="ew")
+            if spec.field_type == "multiline":
+                widget.grid(row=0, column=0, sticky="nsew")
+                frame.rowconfigure(0, weight=1)
+            else:
+                widget.grid(row=0, column=0, sticky="ew")
             ttk.Label(frame, text=spec.help_text, wraplength=240, foreground="#555555").grid(
                 row=1, column=0, sticky="w", pady=(6, 0)
             )
@@ -617,6 +695,25 @@ class MeshtasticConfigGUI:
             return ttk.Combobox(parent, textvariable=variable, values=spec.choices, state="readonly", width=spec.width)
         if spec.field_type == "bool":
             return ttk.Checkbutton(parent, variable=variable, text="Enabled")
+        if spec.field_type == "multiline":
+            widget = tk.Text(parent, height=spec.height, wrap="word")
+            widget.insert("1.0", variable.get())
+
+            def sync_from_widget(_event=None, current_widget=widget, current_variable=variable):
+                current_variable.set(current_widget.get("1.0", "end-1c"))
+
+            widget.bind("<KeyRelease>", sync_from_widget)
+            widget.bind("<FocusOut>", sync_from_widget)
+
+            def sync_from_variable(*_args, current_widget=widget, current_variable=variable):
+                current_value = current_widget.get("1.0", "end-1c")
+                new_value = current_variable.get()
+                if current_value != new_value:
+                    current_widget.delete("1.0", tk.END)
+                    current_widget.insert("1.0", new_value)
+
+            variable.trace_add("write", sync_from_variable)
+            return widget
         return ttk.Entry(parent, textvariable=variable, width=spec.width)
 
     def _build_preview_text(self, parent: ttk.Frame) -> tk.Text:
@@ -648,23 +745,24 @@ class MeshtasticConfigGUI:
             else:
                 variables[spec.key].set("" if value == "" else str(value))
 
-    def _validated_all(self) -> tuple[dict, dict, dict]:
+    def _validated_all(self) -> tuple[dict, dict, dict, dict]:
         send_settings = ConfigLogic.validate_settings(self._collect_values(self.send_specs, self.send_vars), self.send_specs)
         listen_settings = ConfigLogic.validate_settings(self._collect_values(self.listen_specs, self.listen_vars), self.listen_specs)
         autoresponder_settings = ConfigLogic.validate_settings(self._collect_values(self.autoresponder_specs, self.autoresponder_vars), self.autoresponder_specs)
+        chatbot_settings = ConfigLogic.validate_settings(self._collect_values(self.chatbot_specs, self.chatbot_vars), self.chatbot_specs)
         send_settings["mode"] = "send"
         listen_settings["mode"] = "listen"
-        return send_settings, listen_settings, autoresponder_settings
+        return send_settings, listen_settings, autoresponder_settings, chatbot_settings
 
     def _active_family(self) -> str:
         if self.form_notebook is None:
             return "send"
         current_index = self.form_notebook.index(self.form_notebook.select())
-        return "listen" if current_index == 1 else "autoresponder" if current_index == 2 else "send"
+        return "listen" if current_index == 1 else "autoresponder" if current_index == 2 else "chatbot" if current_index == 3 else "send"
 
     def _update_action_labels(self) -> None:
         family = self._active_family()
-        label = "Listen CFG" if family == "listen" else "Autoresponder CFG" if family == "autoresponder" else "Send CFG"
+        label = "Listen CFG" if family == "listen" else "Autoresponder CFG" if family == "autoresponder" else "Chatbot CFG" if family == "chatbot" else "Send CFG"
         if self.load_button is not None:
             self.load_button.configure(text=f"Load {label}")
         if self.save_button is not None:
@@ -674,18 +772,20 @@ class MeshtasticConfigGUI:
         family = self._active_family()
         self._update_action_labels()
         if self.preview_notebook is not None:
-            self.preview_notebook.select(1 if family == "listen" else 2 if family == "autoresponder" else 0)
+            self.preview_notebook.select(1 if family == "listen" else 2 if family == "autoresponder" else 3 if family == "chatbot" else 0)
 
     def generate_preview(self) -> None:
         try:
-            send_settings, listen_settings, autoresponder_settings = self._validated_all()
+            send_settings, listen_settings, autoresponder_settings, chatbot_settings = self._validated_all()
             output_dir = Path(self.output_dir_var.get()).expanduser()
             send_text = ConfigLogic.render_cfg("send", send_settings, output_dir / "meshtastic_mass_com.py")
             listen_text = ConfigLogic.render_cfg("listen", listen_settings, output_dir / "meshtastic_mass_com.py")
             autoresponder_text = ConfigLogic.render_cfg("autoresponder", autoresponder_settings, output_dir / "meshtastic_mass_com.py")
+            chatbot_text = ConfigLogic.render_cfg("chatbot", chatbot_settings, output_dir / "meshtastic_mass_com.py")
             self._set_preview(self.send_preview, send_text)
             self._set_preview(self.listen_preview, listen_text)
             self._set_preview(self.autoresponder_preview, autoresponder_text)
+            self._set_preview(self.chatbot_preview, chatbot_text)
             self.status_var.set("Preview generated successfully.")
         except Exception as exc:
             messagebox.showerror(APP_TITLE, str(exc))
@@ -698,15 +798,17 @@ class MeshtasticConfigGUI:
     def load_existing_configs(self, initial: bool = False) -> None:
         try:
             output_dir = Path(self.output_dir_var.get()).expanduser()
-            send_settings, listen_settings, autoresponder_settings = ConfigLogic.load_cfg_set(output_dir)
+            send_settings, listen_settings, autoresponder_settings, chatbot_settings = ConfigLogic.load_cfg_set(output_dir)
             self._set_values(self.send_specs, self.send_vars, send_settings)
             self._set_values(self.listen_specs, self.listen_vars, listen_settings)
             self._set_values(self.autoresponder_specs, self.autoresponder_vars, autoresponder_settings)
+            self._set_values(self.chatbot_specs, self.chatbot_vars, chatbot_settings)
             self.generate_preview()
             send_exists = ConfigLogic.config_path(output_dir, "send").exists()
             listen_exists = ConfigLogic.config_path(output_dir, "listen").exists()
             autoresponder_exists = ConfigLogic.config_path(output_dir, "autoresponder").exists()
-            if send_exists or listen_exists or autoresponder_exists:
+            chatbot_exists = ConfigLogic.config_path(output_dir, "chatbot").exists()
+            if send_exists or listen_exists or autoresponder_exists or chatbot_exists:
                 self.status_var.set(f"Loaded existing cfg files from {output_dir}")
             elif initial:
                 self.status_var.set("No existing cfg files found. Showing default values.")
@@ -734,6 +836,8 @@ class MeshtasticConfigGUI:
                 self._set_values(self.listen_specs, self.listen_vars, settings)
             elif family == "autoresponder":
                 self._set_values(self.autoresponder_specs, self.autoresponder_vars, settings)
+            elif family == "chatbot":
+                self._set_values(self.chatbot_specs, self.chatbot_vars, settings)
             else:
                 self._set_values(self.send_specs, self.send_vars, settings)
             self.generate_preview()
@@ -754,9 +858,11 @@ class MeshtasticConfigGUI:
             messagebox.showerror(APP_TITLE, f"Could not save config files:\n{exc}")
             self.status_var.set(f"Save failed: {exc}")
 
-    def _settings_for_family(self, family: str, send_settings: dict, listen_settings: dict, autoresponder_settings: dict) -> dict:
+    def _settings_for_family(self, family: str, send_settings: dict, listen_settings: dict, autoresponder_settings: dict, chatbot_settings: dict) -> dict:
         return (
-            autoresponder_settings
+            chatbot_settings
+            if family == "chatbot"
+            else autoresponder_settings
             if family == "autoresponder"
             else listen_settings
             if family == "listen"
@@ -764,9 +870,9 @@ class MeshtasticConfigGUI:
         )
 
     def _save_family_config(self, family: str) -> Path:
-        send_settings, listen_settings, autoresponder_settings = self._validated_all()
+        send_settings, listen_settings, autoresponder_settings, chatbot_settings = self._validated_all()
         output_dir = Path(self.output_dir_var.get()).expanduser()
-        settings = self._settings_for_family(family, send_settings, listen_settings, autoresponder_settings)
+        settings = self._settings_for_family(family, send_settings, listen_settings, autoresponder_settings, chatbot_settings)
         target_path = ConfigLogic.config_path(output_dir, family)
         new_content = ConfigLogic.render_cfg(family, settings, output_dir / "meshtastic_mass_com.py")
         if target_path.exists():
