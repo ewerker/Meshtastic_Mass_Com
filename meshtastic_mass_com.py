@@ -686,6 +686,18 @@ def format_effective_value(value) -> str:
     return str(value)
 
 
+def mask_sensitive_effective_value(source_key: str, value) -> str:
+    rendered = format_effective_value(value)
+    if source_key != "chatbot_api_key_env":
+        return rendered
+    text = str(value or "")
+    if text.startswith("sk-"):
+        if len(text) <= 10:
+            return "<hidden api key>"
+        return f"{text[:6]}...{text[-4:]}"
+    return rendered
+
+
 def print_effective_parameters(settings: dict, mode_label: str, fields: list[tuple[str, object]]) -> None:
     print()
     print(colorize(f"Effective parameters for {mode_label}:", "cyan", bold=True))
@@ -710,7 +722,7 @@ def print_effective_parameters(settings: dict, mode_label: str, fields: list[tup
             source_key, value = field
             display_key = source_key
         source = settings.get("__sources", {}).get(source_key, "default")
-        print(f"  {format_source_label(source)} {display_key} = {format_effective_value(value)}")
+        print(f"  {format_source_label(source)} {display_key} = {mask_sensitive_effective_value(source_key, value)}")
 
 
 def config_file_values(settings: dict, config_family: str) -> dict[str, str]:

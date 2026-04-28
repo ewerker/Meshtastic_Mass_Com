@@ -8,6 +8,12 @@ The format is inspired by Keep a Changelog and uses project release tags where a
 
 - Reserved for upcoming changes before the next tagged release.
 
+## [0.7.8] - 2026-04-28
+
+### Changed
+
+- Masked accidentally embedded OpenAI-style API keys in the startup parameter display so sensitive values are no longer shown in clear text.
+
 ## [0.7.7] - 2026-04-27
 
 ### Added
